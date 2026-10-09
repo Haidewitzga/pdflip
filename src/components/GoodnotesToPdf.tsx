@@ -8,6 +8,15 @@ import { canShareFiles, download, safeFilename, share } from '../lib/download'
 import { openPdf, renderPage } from '../lib/pdfToCards'
 import FilePicker from './FilePicker'
 import Progress from './Progress'
+import ProblemReport from './ProblemReport'
+import {
+  countOf,
+  isUnexpected,
+  unexpectedErrorProblem,
+  unreadablePartProblems,
+  unsupportedCharactersProblem,
+  type Problem,
+} from '../lib/problems'
 
 type Status =
   | { step: 'empty' }
@@ -24,25 +33,32 @@ export default function GoodnotesToPdf() {
   const [labels, setLabels] = useState(true)
   const [error, setError] = useState('')
   const [status, setStatus] = useState<Status>({ step: 'empty' })
+  /** Problems found while reading the deck or creating the PDF (unknown parts, characters, errors). */
+  const [problems, setProblems] = useState<Problem[]>([])
 
   const working = status.step === 'reading' || status.step === 'creating' || status.step === 'saving'
 
   async function onFile(file: File) {
     setError('')
+    setProblems([])
     setDeck(null)
     setFileName(file.name)
     setStatus({ step: 'reading' })
     try {
-      setDeck(await readDeck(await readGoodnotesFile(file)))
+      const d = await readDeck(await readGoodnotesFile(file))
+      setDeck(d)
+      setProblems(unreadablePartProblems(d.skipped ?? []))
       setStatus({ step: 'ready' })
     } catch (e) {
       setFileName('')
       setError(e instanceof Error ? e.message : String(e))
+      if (isUnexpected(e)) setProblems([unexpectedErrorProblem('goodnotes-to-pdf', 'reading the deck', e)])
       setStatus({ step: 'empty' })
     }
   }
 
   function clearFile() {
+    setProblems([])
     setDeck(null)
     setFileName('')
     setError('')
@@ -58,6 +74,8 @@ export default function GoodnotesToPdf() {
   async function create() {
     if (!deck) return
     setError('')
+    // problems from an earlier PDF of this deck are found again
+    setProblems(unreadablePartProblems(deck.skipped ?? []))
     setStatus({ step: 'creating', done: 0, total: deck.cards.length })
     try {
       const pdf = await deckToPdf(deck, {
@@ -70,14 +88,19 @@ export default function GoodnotesToPdf() {
             return new Uint8Array(await r.arrayBuffer())
           }),
         onProgress: (done, total) => setStatus(done === total ? { step: 'saving' } : { step: 'creating', done, total }),
+        onUnsupportedCharacters: (chars) => setProblems((ps) => [...ps, unsupportedCharactersProblem(chars)]),
       })
       const preview = await renderPreview(pdf, layout === 'pages' ? 2 : 1).catch(() => [])
       setStatus({ step: 'done', pdf, preview })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
+      if (isUnexpected(e)) setProblems((ps) => [...ps, unexpectedErrorProblem('goodnotes-to-pdf', 'creating the PDF', e)])
       setStatus({ step: 'ready' })
     }
   }
+
+  const unreadable = problems.filter((p) => p.kind === 'unreadable-part')
+  const otherProblems = problems.filter((p) => p.kind !== 'unreadable-part')
 
   const outName = `${safeFilename(deck?.title || fileName.replace(/\.goodnotes$/i, '') || 'Flashcards')}.pdf`
 
@@ -100,6 +123,7 @@ export default function GoodnotesToPdf() {
       </fieldset>
 
       {error && <p className="error" role="alert">{error}</p>}
+      <ProblemReport key={problemKey(otherProblems)} problems={otherProblems} heading="PDFlip could not handle everything in this deck" />
       {status.step === 'reading' && <Progress label="Reading deck…" />}
 
       {deck && (
@@ -108,7 +132,16 @@ export default function GoodnotesToPdf() {
             <strong>{deck.title}</strong> · {deck.cards.length} card{deck.cards.length === 1 ? '' : 's'}
           </p>
 
-          {deck.skipped && deck.skipped.length > 0 && <SkippedNotice skipped={deck.skipped} />}
+          {deck.skipped && deck.skipped.length > 0 && (
+            <ProblemReport
+              key={problemKey(unreadable)}
+              problems={unreadable}
+              tone="warning"
+              heading="Some parts could not be read and will be missing from the PDF. They are still in your Goodnotes deck."
+            >
+              <SkippedList skipped={deck.skipped} />
+            </ProblemReport>
+          )}
 
           <fieldset className="settings" disabled={working}>
             <h2>1. Choose a layout</h2>
@@ -172,29 +205,19 @@ export default function GoodnotesToPdf() {
 
 const SHOWN = 8
 
+const problemKey = (ps: Problem[]) => ps.map((p) => p.signature).join('|')
+
 /** Lists the parts of cards that could not be read and will be missing from the PDF. */
-function SkippedNotice({ skipped }: { skipped: Skipped[] }) {
-  const plural = (n: number, what: string) => {
-    if (n === 1) return `1 ${what}`
-    // pluralise the noun before any "(…)" note, e.g. "image (HEIC)" → "images (HEIC)"
-    const [noun, ...rest] = what.split(' (')
-    return `${n} ${noun}${/(s|x)$/.test(noun) ? 'es' : 's'}${rest.length ? ' (' + rest.join(' (') : ''}`
-  }
+function SkippedList({ skipped }: { skipped: Skipped[] }) {
   return (
-    <div className="notice warning" role="status">
-      <p>
-        <strong>Some parts could not be read</strong> and will be missing from the PDF. They are still in your Goodnotes
-        deck.
-      </p>
-      <ul>
-        {skipped.slice(0, SHOWN).map((s) => (
-          <li key={`${s.card}-${s.side}-${s.what}`}>
-            Card {s.card}, {s.side}: {plural(s.count, s.what)}
-          </li>
-        ))}
-        {skipped.length > SHOWN && <li>…and {skipped.length - SHOWN} more</li>}
-      </ul>
-    </div>
+    <ul>
+      {skipped.slice(0, SHOWN).map((s) => (
+        <li key={`${s.card}-${s.side}-${s.what}`}>
+          Card {s.card}, {s.side}: {countOf(s.count, s.what)}
+        </li>
+      ))}
+      {skipped.length > SHOWN && <li>…and {skipped.length - SHOWN} more</li>}
+    </ul>
   )
 }
 

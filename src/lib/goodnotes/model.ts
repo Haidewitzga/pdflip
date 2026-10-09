@@ -65,6 +65,8 @@ export interface Skipped {
   /** What was left out, e.g. "pen stroke" or "image (HEIC)". */
   what: string
   count: number
+  /** Technical fingerprint of the first such part, for problem reports (no card content). */
+  detail?: string
 }
 
 export interface Deck {

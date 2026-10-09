@@ -1,0 +1,12 @@
+# Cloudflare Worker that turns PDFlip problem reports into GitHub issues.
+# Deploy: see docs/PROBLEM_REPORTS.md (npx wrangler deploy, from this folder).
+name = "pdflip-reports"
+main = "src/worker.ts"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+[vars]
+GITHUB_REPO = "Haidewitzga/pdflip"
+ALLOWED_ORIGINS = "https://haidewitzga.github.io,http://localhost:5173,http://localhost:4173"
+
+# GITHUB_TOKEN is a secret: npx wrangler secret put GITHUB_TOKEN

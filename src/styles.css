@@ -548,3 +548,59 @@ fieldset.settings:disabled {
   margin: 8px 0 0;
   padding-left: 20px;
 }
+
+.notice.problem.tone-error {
+  background: color-mix(in srgb, var(--error) 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--error) 45%, transparent);
+}
+
+.notice.problem ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+
+.notice.problem .muted {
+  margin-top: 10px;
+}
+
+.report-preview {
+  margin-top: 8px;
+}
+
+.report-preview summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.report-preview pre {
+  max-height: 240px;
+  overflow: auto;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+a.button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.notice.problem.tone-warning {
+  background: color-mix(in srgb, var(--warn) 12%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+}
+
+.notice.problem.tone-error > p:first-child {
+  color: var(--error);
+}

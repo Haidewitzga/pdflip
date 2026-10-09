@@ -15,6 +15,12 @@ without internet, including when added to the iPad Home Screen.
 
 PDFlip is an independent project and is not affiliated with, endorsed by, or connected to Goodnotes.
 
+## Problem reports
+
+When PDFlip cannot fully read a file it says so and offers a one-tap report with technical details only (never the
+file). Reports become GitHub issues via a small Cloudflare Worker, and a scheduled Claude routine proposes a fix for
+each as a pull request. See [docs/PROBLEM_REPORTS.md](docs/PROBLEM_REPORTS.md).
+
 ## Development
 
 ```bash

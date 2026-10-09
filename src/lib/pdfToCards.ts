@@ -6,6 +6,26 @@ import { writeDeck, type NewCard, type SideImage } from './goodnotes/write'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 
+/** Warnings from pdf.js for the PDF opened most recently (see pdfWorker.ts). */
+let collecting: Set<string> | null = null
+let workerStarted = false
+
+/** Starts pdf.js's worker through our wrapper, which forwards its warnings. */
+function startWorker() {
+  if (workerStarted || typeof Worker === 'undefined') return
+  workerStarted = true
+  try {
+    const worker = new Worker(new URL('./pdfWorker.ts', import.meta.url), { type: 'module' })
+    worker.addEventListener('message', (e: MessageEvent) => {
+      const w = (e.data as { pdflipWarning?: unknown } | null)?.pdflipWarning
+      if (typeof w === 'string') collecting?.add(w)
+    })
+    pdfjs.GlobalWorkerOptions.workerPort = worker
+  } catch {
+    // pdf.js then starts its own worker from workerSrc, without forwarded warnings
+  }
+}
+
 export type PdfDoc = pdfjs.PDFDocumentProxy
 
 /** Page sizes in points (rotation applied). */
@@ -18,12 +38,62 @@ export async function pageSizes(doc: PdfDoc): Promise<{ w: number; h: number }[]
   return out
 }
 
+/** pdf.js version, for problem reports. */
+export const PDFJS_VERSION = pdfjs.version
+
+/**
+ * Character maps (CMaps) a PDF asked for while it was drawn. PDFs with fonts that are not embedded
+ * in the file, typically Chinese, Japanese or Korean text, need them; PDFlip does not ship any yet,
+ * so that text is missing from the rendered pages. Filled while pages are rendered.
+ */
+const missingCMaps = new WeakMap<PdfDoc, Set<string>>()
+const warningsOf = new WeakMap<PdfDoc, Set<string>>()
+
+export function missingCharacterMaps(doc: PdfDoc): string[] {
+  return [...(missingCMaps.get(doc) ?? [])].sort()
+}
+
+/** Warnings pdf.js gave while reading and drawing this PDF (filled while pages are rendered). */
+export function readerWarnings(doc: PdfDoc): string[] {
+  return [...(warningsOf.get(doc) ?? [])]
+}
+
+/** Thrown for PDFs that cannot be opened; `technical` carries pdf.js's own message for reports. */
+export class PdfOpenError extends Error {
+  constructor(
+    message: string,
+    readonly technical?: string,
+  ) {
+    super(message)
+  }
+}
+
 export async function openPdf(data: ArrayBuffer): Promise<PdfDoc> {
+  startWorker()
+  const requested = new Set<string>()
+  const warnings = new Set<string>()
+  collecting = warnings
+  // pdf.js asks this factory (on the page, not in its worker) for every character map it needs.
+  class RecordingCMapReader {
+    async fetch({ name }: { name: string }): Promise<never> {
+      requested.add(name)
+      throw new Error('Ensure that the `cMapUrl` and `cMapPacked` API parameters are provided.')
+    }
+  }
   try {
-    return await pdfjs.getDocument({ data: new Uint8Array(data), isEvalSupported: false, enableXfa: false }).promise
+    const doc = await pdfjs.getDocument({
+      data: new Uint8Array(data),
+      isEvalSupported: false,
+      enableXfa: false,
+      CMapReaderFactory: RecordingCMapReader,
+      useWorkerFetch: false,
+    }).promise
+    missingCMaps.set(doc, requested)
+    warningsOf.set(doc, warnings)
+    return doc
   } catch (e) {
     if (e instanceof Error && e.name === 'PasswordException') throw new Error('This PDF is password-protected. Remove the password and try again.')
-    throw new Error('Could not read this PDF.')
+    throw new PdfOpenError('Could not read this PDF.', e instanceof Error ? `${e.name}: ${e.message}` : String(e))
   }
 }
 

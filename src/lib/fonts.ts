@@ -32,6 +32,8 @@ export class FontBook {
   private standard = new Map<StandardFonts, PDFFont>()
   private fallback: PDFFont | null | undefined
   private encodable = new Map<PDFFont, Map<string, boolean>>()
+  /** Characters no available font can show; they are drawn as "?" and listed in problem reports. */
+  readonly unsupported = new Set<string>()
 
   constructor(
     private pdf: PDFDocument,
@@ -64,6 +66,12 @@ export class FontBook {
     return ok
   }
 
+  /** Whether the embedded Unicode font has a real glyph (not an empty box) for a character. */
+  private hasGlyph(font: PDFFont, ch: string): boolean {
+    const fk = (font as unknown as { embedder?: { font?: { hasGlyphForCodePoint?: (cp: number) => boolean } } }).embedder?.font
+    return fk?.hasGlyphForCodePoint ? fk.hasGlyphForCodePoint(ch.codePointAt(0)!) : this.canEncode(font, ch)
+  }
+
   private async unicodeFont(): Promise<PDFFont | null> {
     if (this.fallback === undefined) {
       this.fallback = null
@@ -94,8 +102,13 @@ export class FontBook {
         continue
       }
       const uni = await this.unicodeFont()
-      if (uni) push(ch, uni)
-      else push('?', primary)
+      if (uni && this.hasGlyph(uni, ch)) push(ch, uni)
+      else {
+        // whitespace and invisible formatting characters are not worth a "?" or a report
+        if (/[\s\p{Cf}]/u.test(ch)) continue
+        this.unsupported.add(ch)
+        push('?', primary)
+      }
     }
     return out
   }

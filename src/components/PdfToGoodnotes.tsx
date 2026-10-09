@@ -1,11 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { openPdf, pageSizes, pdfToDeck, renderPage, type CardSpec, type PdfDoc } from '../lib/pdfToCards'
+import {
+  missingCharacterMaps,
+  readerWarnings,
+  openPdf,
+  pageSizes,
+  PdfOpenError,
+  PDFJS_VERSION,
+  pdfToDeck,
+  renderPage,
+  type CardSpec,
+  type PdfDoc,
+} from '../lib/pdfToCards'
+import { isUnexpected, missingCharacterMapProblem, pdfReaderWarningProblem, unexpectedErrorProblem, type Problem } from '../lib/problems'
 import { readPdfFile } from '../lib/fileCheck'
 import { detectPdflipLayout, type PdflipLayout } from '../lib/pdflipLayout'
 import { autoMarks, MODES, pairMarks, restorePdflipCards, splitPages, type Mark, type Mode } from '../lib/pairing'
 import { canShareFiles, download, safeFilename, share } from '../lib/download'
 import FilePicker from './FilePicker'
 import Progress from './Progress'
+import ProblemReport from './ProblemReport'
 
 const GOODNOTES_MIME = 'application/octet-stream'
 
@@ -24,13 +37,31 @@ export default function PdfToGoodnotes() {
   const [pdflip, setPdflip] = useState<PdflipLayout | null>(null)
   const [aspects, setAspects] = useState<number[]>([])
   const [restore, setRestore] = useState(true)
+  const [problems, setProblems] = useState<Problem[]>([])
   const loadId = useRef(0)
 
   const pageCount = doc?.numPages ?? 0
 
+  /** Reports what the PDF reader could not handle while it drew the pages (character maps, warnings). */
+  function checkPdf(d: PdfDoc) {
+    const cmaps = missingCharacterMaps(d)
+    const found = [
+      cmaps.length ? missingCharacterMapProblem(cmaps, PDFJS_VERSION) : null,
+      pdfReaderWarningProblem(readerWarnings(d), PDFJS_VERSION),
+    ].filter((p): p is Problem => !!p)
+    if (found.length === 0) return
+    setProblems((ps) => [...ps.filter((p) => !found.some((f) => f.kind === p.kind)), ...found])
+  }
+
+  function reportError(stage: string, e: unknown) {
+    if (e instanceof PdfOpenError) setProblems([unexpectedErrorProblem('pdf-to-goodnotes', stage, e, e.technical)])
+    else if (isUnexpected(e)) setProblems((ps) => [...ps, unexpectedErrorProblem('pdf-to-goodnotes', stage, e)])
+  }
+
   async function onFile(file: File) {
     setError('')
     setResult(null)
+    setProblems([])
     const id = ++loadId.current
     try {
       const d = await openPdf(await readPdfFile(file))
@@ -61,8 +92,10 @@ export default function PdfToGoodnotes() {
         })
         setThumbsDone(p)
       }
+      checkPdf(d)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
+      reportError('opening the PDF', e)
     }
   }
 
@@ -79,6 +112,7 @@ export default function PdfToGoodnotes() {
     setMarks([])
     setResult(null)
     setError('')
+    setProblems([])
   }
 
   function chooseMode(m: Mode) {
@@ -136,8 +170,10 @@ export default function PdfToGoodnotes() {
     try {
       const bytes = await pdfToDeck(doc, title.trim() || 'Flashcards', cards, (d, t) => setProgress([d, t]))
       setResult(bytes)
+      checkPdf(doc)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
+      reportError('creating the deck', e)
     } finally {
       setProgress(null)
     }
@@ -167,6 +203,7 @@ export default function PdfToGoodnotes() {
       </fieldset>
 
       {error && <p className="error" role="alert">{error}</p>}
+      <ProblemReport key={problems.map((p) => p.signature).join('|')} problems={problems} heading="PDFlip cannot fully read this PDF" />
 
       {doc && thumbsDone < pageCount && <Progress label="Loading pages…" done={thumbsDone} total={pageCount} />}
 
