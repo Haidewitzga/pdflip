@@ -36,8 +36,8 @@ Mutable values are `{1: value, 2: clock}` with `clock = {1: counter, 2: random u
 | 152 | Card updated | `1: card id`, `3: order`, `4: front`, `5: back` |
 | 10 / 34 / 150 | Viewing state (last page / settings / last card) | not needed |
 
-A card side is `{1: content, 2: clock}` where content is either typed text
-`{1: {1: "text/plain", 2: text}}` or a canvas reference `{3: {1: canvas id}}`. Cards sort by order key (string).
+A card side is `{1: content, 2: clock}` where content is typed text `{1: {1: "text/plain", 2: text}}`,
+a picture `{2: {1: "image/jpeg", 2: attachment id}}` or a canvas reference `{3: {1: canvas id}}`. Cards sort by order key (string).
 
 ## Canvas elements (`notes/<id>`)
 
@@ -51,8 +51,30 @@ The element message is `{<kind>: element}`:
 
 Coordinates are points on a 1193.28 × 745.8 canvas, origin top-left.
 
+**Layering:** elements are stacked by a counter, not by their position in the file: field `7` of ink
+strokes and field `5` of images and text boxes hold `{1: {1: counter, 2: random}}`; higher counters
+are drawn on top. (For example, a picture pasted early can sit above strokes written before it and
+below everything written after.) Ink widths are used as stored, in points.
+
 ### Stroke blob
 
 Apple LZ4 (`bv41` blocks, `bv4$` terminator) containing a typed structure `tpl\0`, `u32 length`, the signature
 `vuA(v)A(S(uu))A(S(uuuu))vA(f)\0`, then: `u16`, `f32 width`, `u32 n`, `n × u16` element types, `u32 1`,
 `f32 x, y` start point, `u32 m`, `m × (f32 qx, qy, x, y)` quadratic segments, 6 trailing bytes.
+
+### Strokes snapped to a shape
+
+When the stroke blob has no path elements (`n = 0`) the stroke is a shape in field 9 of the element:
+`{1: {1: {x, y}, 1: {x, y}, ...}, 5: {2: type}, 15: width}` (type 1 = straight line).
+Erased strokes look similar but have `3: 1` in their header.
+
+### Centre lines plus filled outlines
+
+Some ink (e.g. arrows, ⊗, dots) uses the signature `vuA(v)A(u)A(u)A(v)A(v)A(u)A(u)A(u)A(u)A(v)`,
+laid out with no padding: `u16`, `f32` pen width (sign ignored), then ten arrays (`u32 count` + items).
+
+- Layer 1, arrays 1–3: commands in array 1. `0` = move (x, y from array 2), `1` = quadratic curve
+  (cx, cy, x, y from array 3); these are stroked with the pen width. `2` (x, y, width from array 2)
+  and `3` (6 values from array 3) describe dots, which layer 2 draws.
+- Layer 2, arrays 4–8: the dots' filled outline. Commands in array 5 (2 = new subpath, 4 = cubic
+  curve), one start point per subpath in array 6 and the curve points (3 per curve) in array 8.

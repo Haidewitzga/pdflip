@@ -120,6 +120,112 @@ describe('deck reader', () => {
   })
 })
 
+// Wraps bytes in a bv41 container using a single literal-only LZ4 block.
+function bv41(data: Uint8Array): Uint8Array {
+  const lit = data.length
+  const token: number[] = []
+  if (lit < 15) token.push(lit << 4)
+  else {
+    token.push(0xf0)
+    let r = lit - 15
+    while (r >= 255) {
+      token.push(255)
+      r -= 255
+    }
+    token.push(r)
+  }
+  const block = Uint8Array.from([...token, ...data])
+  const head = new Uint8Array(12)
+  head.set([0x62, 0x76, 0x34, 0x31])
+  new DataView(head.buffer).setUint32(4, data.length, true)
+  new DataView(head.buffer).setUint32(8, block.length, true)
+  return Uint8Array.from([...head, ...block, 0x62, 0x76, 0x34, 0x24])
+}
+
+function tpl(signature: string, payload: number[]): Uint8Array {
+  const sig = new TextEncoder().encode(signature)
+  const out = new Uint8Array(8 + sig.length + 1 + payload.length)
+  out.set([0x74, 0x70, 0x6c, 0])
+  out.set(sig, 8)
+  out.set(payload, 8 + sig.length + 1)
+  return out
+}
+
+const u16 = (v: number) => [v & 255, v >> 8]
+const u32 = (v: number) => [...new Uint8Array(new Uint32Array([v]).buffer)]
+const f32 = (v: number) => [...new Uint8Array(new Float32Array([v]).buffer)]
+
+async function deckWithStroke(stroke: Msg): Promise<Uint8Array> {
+  const canvas = 'C0000000-0000-5000-8000-000000000010'
+  const side = (content: Msg) => new Msg().bytes(1, content).bytes(2, new Msg().int(1, 1).int(2, 5))
+  const card = new Msg()
+    .bytes(1, 'CARD')
+    .bytes(3, new Msg().bytes(1, 'A'))
+    .bytes(4, side(new Msg().bytes(3, new Msg().bytes(1, canvas))))
+    .bytes(5, side(new Msg().bytes(1, new Msg().bytes(1, 'text/plain').bytes(2, 'x'))))
+  const zip = new JSZip()
+  zip.file('index.events.pb', writeStream([new Msg().bytes(1, 'CARD').bytes(152, card)]))
+  zip.file('notes/' + uuidPlusOne(canvas), writeStream([new Msg().bytes(7, stroke)]))
+  return zip.generateAsync({ type: 'uint8array' })
+}
+
+describe('ink formats', () => {
+  it('reads strokes snapped to a straight line', async () => {
+    const empty = tpl('vuA(v)A(S(uu))A(S(uuuu))vA(f)', [...u16(2), ...f32(1.5), ...u32(0), ...u32(0), ...u32(0), ...u16(1), ...u32(0)])
+    const point = (x: number, y: number) => new Msg().f32(1, x).f32(2, y)
+    const shape = new Msg()
+      .bytes(1, new Msg().bytes(1, point(10, 20)).bytes(1, point(110, 20)))
+      .bytes(5, new Msg().int(2, 1))
+      .f32(15, 2)
+    const stroke = new Msg().bytes(1, 'S1').bytes(2, bv41(empty)).bytes(4, new Msg().f32(4, 1)).bytes(6, new Msg().f32(1, 5)).bytes(9, shape)
+    const side = (await readDeck(await deckWithStroke(stroke))).cards[0].front
+    expect(side.kind === 'canvas' && side.strokes[0]).toMatchObject({ start: [15, 20], segments: [65, 20, 115, 20], width: 2 })
+  })
+
+  it('reads ink stored as centre lines plus filled outlines', async () => {
+    const arr16 = (xs: number[]) => [...u32(xs.length), ...xs.flatMap(u16)]
+    const arr32 = (xs: number[]) => [...u32(xs.length), ...xs.flatMap(f32)]
+    const payload = [
+      ...u16(2), ...u32(0),
+      ...arr16([0, 1, 2, 3]), ...arr32([10, 10, 0, 0, 1]), ...arr32([15, 10, 20, 10, 0, 0, 0, 0, 1, 1]), ...arr16([2]),
+      ...arr16([2, 4]), ...arr32([1, 2]), ...arr32([]), ...arr32([3, 4, 5, 6, 7, 8]), ...arr32([]), ...arr16([]),
+    ]
+    const blob = bv41(tpl('vuA(v)A(u)A(u)A(v)A(v)A(u)A(u)A(u)A(u)A(v)', payload))
+    const stroke = new Msg().bytes(1, 'S2').bytes(2, blob).bytes(4, new Msg().f32(1, 1).f32(4, 1))
+    const side = (await readDeck(await deckWithStroke(stroke))).cards[0].front
+    expect(side.kind === 'canvas' && side.fills[0]).toMatchObject({ color: [1, 0, 0, 1], subpaths: [{ start: [1, 2], curves: [3, 4, 5, 6, 7, 8] }] })
+    expect(side.kind === 'canvas' && side.strokes[0]).toMatchObject({ start: [10, 10], segments: [15, 10, 20, 10] })
+    const pdf = await deckToPdf({ title: 't', cards: [{ front: side, back: side }] }, { layout: 'pages', labels: false })
+    expect(pdf.length).toBeGreaterThan(500)
+  })
+})
+
+describe('layering', () => {
+  it('orders canvas elements by their layer counter, not their file position', async () => {
+    const canvas = 'C0000000-0000-5000-8000-000000000010'
+    const layer = (n: number) => new Msg().bytes(1, new Msg().int(1, n).int(2, 9))
+    const rect = (x: number) => new Msg().bytes(1, new Msg().f32(1, x).f32(2, 0)).bytes(2, new Msg().f32(1, 10).f32(2, 10))
+    const empty = tpl('vuA(v)A(S(uu))A(S(uuuu))vA(f)', [...u16(2), ...f32(1.5), ...u32(0), ...u32(0), ...u32(0), ...u16(1), ...u32(0)])
+    const shape = new Msg().bytes(1, new Msg().bytes(1, new Msg().f32(1, 0).f32(2, 0)).bytes(1, new Msg().f32(1, 5).f32(2, 5)))
+    // file order: stroke (layer 50), image (layer 10)
+    const stroke = new Msg().bytes(1, 'S').bytes(2, bv41(empty)).bytes(4, new Msg().f32(4, 1)).bytes(7, layer(50)).bytes(9, shape)
+    const image = new Msg().bytes(1, 'I').bytes(2, rect(0)).bytes(4, 'PIC').bytes(5, layer(10))
+    const side = (content: Msg) => new Msg().bytes(1, content).bytes(2, new Msg().int(1, 1).int(2, 5))
+    const card = new Msg()
+      .bytes(1, 'CARD')
+      .bytes(3, new Msg().bytes(1, 'A'))
+      .bytes(4, side(new Msg().bytes(3, new Msg().bytes(1, canvas))))
+      .bytes(5, side(new Msg().bytes(1, new Msg().bytes(1, 'text/plain').bytes(2, 'x'))))
+    const zip = new JSZip()
+    zip.file('index.events.pb', writeStream([new Msg().bytes(1, 'CARD').bytes(152, card)]))
+    zip.file('notes/' + uuidPlusOne(canvas), writeStream([new Msg().bytes(7, stroke), new Msg().bytes(1, image)]))
+    zip.file('attachments/PIC', PNG)
+    const front = (await readDeck(await zip.generateAsync({ type: 'uint8array' }))).cards[0].front
+    if (front.kind !== 'canvas') throw new Error('expected canvas')
+    expect(front.images[0].z!).toBeLessThan(front.strokes[0].z!)
+  })
+})
+
 // Optional check against a real Goodnotes export: GOODNOTES_SAMPLE=/path/to/deck.goodnotes npm test
 const sample = process.env.GOODNOTES_SAMPLE
 describe.skipIf(!sample || !existsSync(sample))('real Goodnotes deck', () => {

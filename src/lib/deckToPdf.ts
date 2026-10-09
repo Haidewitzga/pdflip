@@ -1,5 +1,5 @@
 import { PDFDocument, PDFFont, PDFImage, PDFPage, rgb, StandardFonts } from 'pdf-lib'
-import { CARD_H, CARD_W, type Deck, type Side, type Stroke } from './goodnotes/model'
+import { CARD_H, CARD_W, type CanvasImage, type Deck, type FilledInk, type Side, type Stroke } from './goodnotes/model'
 
 export type PdfLayout = 'pages' | 'stacked'
 
@@ -102,17 +102,9 @@ async function drawCard(page: PDFPage, font: PDFFont, side: Side, x: number, top
     return
   }
 
-  for (const img of side.images) {
-    const pimg = await embed(img.data)
-    if (pimg)
-      page.drawImage(pimg, {
-        x: x + img.x * scale,
-        y: top - (img.y + img.h) * scale,
-        width: img.w * scale,
-        height: img.h * scale,
-      })
-  }
+  await drawInk(page, side, x, top, scale, embed)
 
+  // Text boxes go on top of everything else.
   for (const t of side.texts) {
     let size = t.fontSize * scale
     const lines = t.text.split('\n').map((l) => safeText(font, l))
@@ -122,38 +114,48 @@ async function drawCard(page: PDFPage, font: PDFFont, side: Side, x: number, top
       page.drawText(line, { x: x + t.x * scale, y: top - t.y * scale - size * (k + 1) * 1.05, size, font, color: rgb(0, 0, 0) })
     })
   }
-
-  await drawStrokes(page, side.strokes, x, top, scale)
 }
 
+type Item =
+  | { z: number; kind: 'stroke'; v: Stroke }
+  | { z: number; kind: 'fill'; v: FilledInk }
+  | { z: number; kind: 'image'; v: CanvasImage }
+
 /**
- * Writes all ink strokes of a card side as one raw PDF content stream, one path per pen
- * (colour + width). Much faster than drawing each stroke through pdf-lib's SVG path parser.
- * Coordinates are written as whole tenths of a point in a flipped coordinate system, which
- * keeps the stream small and cheap to build.
+ * Draws images, ink strokes and filled ink of a canvas in their original order (Goodnotes layers
+ * later elements on top) as one raw PDF content stream. Writing operators directly is much faster
+ * than pdf-lib's per-shape drawing. Coordinates are whole tenths of a point in a flipped
+ * coordinate system with y pointing down from the card's top-left corner.
  */
-async function drawStrokes(page: PDFPage, strokes: Stroke[], x: number, top: number, scale: number) {
-  if (strokes.length === 0) return
-  const groups = new Map<string, Stroke[]>()
-  for (const s of strokes) {
-    const key = `${s.color.map((c) => c.toFixed(3)).join(' ')}|${s.width.toFixed(2)}`
-    const g = groups.get(key)
-    if (g) g.push(s)
-    else groups.set(key, [s])
-  }
+async function drawInk(page: PDFPage, side: Extract<Side, { kind: 'canvas' }>, x: number, top: number, scale: number, embed: Embed) {
+  const items: Item[] = [
+    ...side.images.map((v) => ({ z: v.z ?? 0, kind: 'image' as const, v })),
+    ...side.strokes.map((v) => ({ z: v.z ?? 0, kind: 'stroke' as const, v })),
+    ...side.fills.map((v) => ({ z: v.z ?? 0, kind: 'fill' as const, v })),
+  ].sort((a, b) => a.z - b.z)
+  if (items.length === 0) return
+
   const f = (v: number) => (Math.round(v * 1000) / 1000).toString()
   const t = (v: number) => Math.round(v * 10)
-  // canvas units → tenths of a point, y pointing down from the card's top-left corner
+  const alpha = (a: number) => {
+    if (a >= 1) return ''
+    const gs = page.node.newExtGState('GS', page.doc.context.obj({ CA: a, ca: a }))
+    return `${gs.asString()} gs `
+  }
   const ops: string[] = [`q ${f(scale / 10)} 0 0 ${f(-scale / 10)} ${f(x)} ${f(top)} cm 1 J 1 j`]
-  for (const group of groups.values()) {
-    const [r, g, b, a] = group[0].color
-    ops.push('q')
-    if (a < 1) {
-      const gs = page.node.newExtGState('GS', page.doc.context.obj({ CA: a, ca: a }))
-      ops.push(`${gs.asString()} gs`)
-    }
-    ops.push(`${f(r)} ${f(g)} ${f(b)} RG ${t(Math.max(group[0].width, 0.8) * 1.4)} w`)
-    for (const s of group) {
+
+  for (const item of items) {
+    if (item.kind === 'image') {
+      const img = item.v
+      const pimg = await embed(img.data)
+      if (!pimg) continue
+      const name = page.node.newXObject('Image', pimg.ref)
+      // unit square → image rectangle, flipped back so the picture is upright
+      ops.push(`q ${f(img.w * 10)} 0 0 ${f(-img.h * 10)} ${f(img.x * 10)} ${f((img.y + img.h) * 10)} cm ${name.asString()} Do Q`)
+    } else if (item.kind === 'stroke') {
+      const s = item.v
+      const [r, g, b, a] = s.color
+      ops.push(`q ${alpha(a)}${f(r)} ${f(g)} ${f(b)} RG ${t(Math.max(s.width, 0.5))} w`)
       let cx = s.start[0]
       let cy = s.start[1]
       ops.push(`${t(cx)} ${t(cy)} m`)
@@ -171,10 +173,26 @@ async function drawStrokes(page: PDFPage, strokes: Stroke[], x: number, top: num
         cx = ex
         cy = ey
       }
+      ops.push('S Q')
+    } else {
+      const ink = item.v
+      const [r, g, b, a] = ink.color
+      ops.push(`q ${alpha(a)}${f(r)} ${f(g)} ${f(b)} rg`)
+      for (const sp of ink.subpaths) {
+        ops.push(`${t(sp.start[0])} ${t(sp.start[1])} m`)
+        const c = sp.curves
+        for (let k = 0; k + 5 < c.length; k += 6)
+          ops.push(`${t(c[k])} ${t(c[k + 1])} ${t(c[k + 2])} ${t(c[k + 3])} ${t(c[k + 4])} ${t(c[k + 5])} c`)
+        ops.push('h')
+      }
+      ops.push('f Q')
     }
-    ops.push('S Q')
   }
   ops.push('Q')
+  await addRawContent(page, ops)
+}
+
+async function addRawContent(page: PDFPage, ops: string[]) {
   const ctx = page.doc.context
   const raw = new TextEncoder().encode(ops.join('\n'))
   const deflated = await nativeDeflate(raw)
