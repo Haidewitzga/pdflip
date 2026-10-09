@@ -67,8 +67,12 @@ Apple LZ4 (`bv41` blocks, `bv4$` terminator) containing a typed structure `tpl\0
 
 ### Strokes snapped to a shape
 
-When the stroke blob has no path elements (`n = 0`) the stroke is a shape in field 9 of the element:
-`{1: {1: {x, y}, 1: {x, y}, ...}, 5: {2: type}, 15: width}` (type 1 = straight line).
+When the stroke blob has no path elements (`n = 0`) the stroke is a shape in field 9 of the element,
+with the pen width in field 15 and one of:
+
+- `1: {1: {x, y}, 1: {x, y}, ...}`: a polyline (lines, arrows, triangles, rectangles).
+- `2: {1: start, 2: point halfway along, 3: end}`: an arc.
+- `3: {1: centre, 2: {width, height}}`: an ellipse or circle.
 Erased strokes look similar but have `3: 1` in their header.
 
 ### Centre lines plus filled outlines

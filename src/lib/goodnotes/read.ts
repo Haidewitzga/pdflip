@@ -3,7 +3,7 @@ import { readStream, tryParse, View } from '../pb'
 import { decodeBv41 } from '../lz4'
 import { uuidPlusOne } from '../uuid'
 import { parseRtf } from '../rtf'
-import type { CanvasImage, Card, Deck, FilledInk, RGBA, Side, Stroke, TextBox } from './model'
+import type { CanvasImage, Card, Deck, FilledInk, RGBA, Side, Skipped, Stroke, TextBox } from './model'
 
 const STROKE_SIGNATURE = 'vuA(v)A(S(uu))A(S(uuuu))vA(f)'
 const OUTLINE_SIGNATURE = 'vuA(v)A(u)A(u)A(v)A(v)A(u)A(u)A(u)A(u)A(v)'
@@ -38,6 +38,24 @@ function checkArchiveSize(zip: JSZip) {
   const size = (f: JSZip.JSZipObject) => (f as unknown as { _data?: { uncompressedSize?: number } })._data?.uncompressedSize ?? 0
   const total = files.reduce((sum, f) => sum + size(f), 0)
   if (total > MAX_UNPACKED_BYTES) throw new Error('This .goodnotes file is too large to open.')
+}
+
+/** The image formats the PDF writer can embed. */
+function imageFormatSupported(data: Uint8Array): boolean {
+  const f = imageFormat(data)
+  return f === 'PNG' || f === 'JPEG'
+}
+
+function imageFormat(data: Uint8Array): string {
+  const at = (i: number, text: string) => [...text].every((c, k) => data[i + k] === c.charCodeAt(0))
+  if (data[0] === 0x89 && at(1, 'PNG')) return 'PNG'
+  if (data[0] === 0xff && data[1] === 0xd8) return 'JPEG'
+  if (at(4, 'ftyp')) return 'HEIC'
+  if (at(0, 'GIF8')) return 'GIF'
+  if (at(0, 'RIFF') && at(8, 'WEBP')) return 'WebP'
+  if (at(0, '%PDF')) return 'PDF'
+  if (at(0, 'II*') || at(0, 'MM')) return 'TIFF'
+  return 'unknown format'
 }
 
 /** Reads a flashcard deck from a .goodnotes file. */
@@ -105,7 +123,11 @@ export async function readDeck(file: ArrayBuffer | Uint8Array): Promise<Deck> {
   }
 
   const live = [...cards.values()].filter((c) => c.deleted?.value.int(1) !== 1n && (c.front || c.back || c.order))
-  if (live.length === 0) throw new Error('No flashcards found in this file. Is it a flashcard deck?')
+  if (live.length === 0) {
+    throw new Error(
+      'This Goodnotes file has no flashcards. PDFlip only converts flashcard decks. To turn a normal notebook into a PDF, use Share → Export → PDF in Goodnotes.',
+    )
+  }
 
   const ordered = live.sort((a, b) => {
     const ka = a.order?.value.str(1) ?? ''
@@ -114,37 +136,52 @@ export async function readDeck(file: ArrayBuffer | Uint8Array): Promise<Deck> {
   })
 
   const out: Card[] = []
-  for (const c of ordered) {
-    out.push({ front: await readSide(c.front?.value, read), back: await readSide(c.back?.value, read) })
+  const skipped = new Map<string, Skipped>()
+  for (const [i, c] of ordered.entries()) {
+    const sides = (['question', 'answer'] as const).map((side) => {
+      const skip: Skip = (what) => {
+        const key = `${i}|${side}|${what}`
+        const cur = skipped.get(key)
+        if (cur) cur.count++
+        else skipped.set(key, { card: i + 1, side, what, count: 1 })
+      }
+      return readSide((side === 'question' ? c.front : c.back)?.value, read, skip)
+    })
+    out.push({ front: await sides[0], back: await sides[1] })
   }
-  return { title, cards: out }
+  return { title, cards: out, skipped: [...skipped.values()] }
 }
 
-async function readSide(v: View | undefined, read: (n: string) => Promise<Uint8Array | undefined>): Promise<Side> {
+/** Records one part of a card side that could not be read. */
+type Skip = (what: string) => void
+
+async function readSide(v: View | undefined, read: (n: string) => Promise<Uint8Array | undefined>, skip: Skip): Promise<Side> {
   const content = v?.msg(1)
   if (!content) return { kind: 'text', text: '' }
   const canvasRef = content.msg(3)?.str(1)
   if (canvasRef) {
     const notes = await read('notes/' + uuidPlusOne(canvasRef))
-    return readCanvas(notes ?? new Uint8Array(), read)
+    return readCanvas(notes ?? new Uint8Array(), read, skip)
   }
   // Picture side: {2: {1: mime type, 2: attachment id}}
   const picture = content.msg(2)?.str(2)
   if (picture) {
     const data = await read('attachments/' + picture)
-    if (data) return { kind: 'image', data }
+    if (!data) skip('image (file missing)')
+    else if (!imageFormatSupported(data)) skip(`image (${imageFormat(data)})`)
+    else return { kind: 'image', data }
+    return { kind: 'text', text: '' }
   }
   const text = content.msg(1)?.str(2)
   if (text !== undefined || content.fields.length === 0 || (content.fields.length === 1 && content.has(1))) {
     return { kind: 'text', text: text ?? '' }
   }
-  // A kind of card content we have not seen in an export yet: say so instead of printing a blank side.
-  return { kind: 'text', text: UNSUPPORTED_SIDE }
+  // A kind of card content we have not seen in an export yet
+  skip('card side (unknown kind)')
+  return { kind: 'text', text: '' }
 }
 
-export const UNSUPPORTED_SIDE = '[PDFlip cannot read this card side yet]'
-
-async function readCanvas(data: Uint8Array, read: (n: string) => Promise<Uint8Array | undefined>): Promise<Side> {
+async function readCanvas(data: Uint8Array, read: (n: string) => Promise<Uint8Array | undefined>, skip: Skip): Promise<Side> {
   const deleted = new Set<string>()
   /** Element id → attachment file named in its header (decks re-saved by Goodnotes use field 7). */
   const headerFiles = new Map<string, string>()
@@ -179,19 +216,22 @@ async function readCanvas(data: Uint8Array, read: (n: string) => Promise<Uint8Ar
     if ((id && deleted.has(id)) || e.int(14) === 1n) continue
     if (kind === 7) {
       const s = readStroke(e)
-      if (s && 'segments' in s) strokes.push({ ...s, z })
-      else if (s) {
+      if (!s) skip('pen stroke')
+      else if ('segments' in s) strokes.push({ ...s, z })
+      else {
         if (s.fill) fills.push({ ...s.fill, z })
         strokes.push(...s.lines.map((l) => ({ ...l, z })))
       }
-    } else if (kind === 1 && e.has(4)) {
+    } else if (kind === 1) {
       const fr = frame(e.msg(2))
       // Field 4 names the attachment in decks PDFlip wrote; after Goodnotes re-saves a deck it holds
       // an internal image id instead and the header's field 7 names the file.
       const att = e.str(4)
       const file = id ? headerFiles.get(id) : undefined
       const bytes = (att ? await read('attachments/' + att) : undefined) ?? (file ? await read('attachments/' + file) : undefined)
-      if (fr && bytes) images.push({ ...fr, data: bytes, z })
+      if (!fr || !bytes) skip('image')
+      else if (!imageFormatSupported(bytes)) skip(`image (${imageFormat(bytes)})`)
+      else images.push({ ...fr, data: bytes, z })
     } else if (kind === 8) {
       const fr = frame(e.msg(2))
       const rtf = e.str(6)
@@ -199,7 +239,9 @@ async function readCanvas(data: Uint8Array, read: (n: string) => Promise<Uint8Ar
         const scale = e.msg(4)?.num(1, 1) || 1
         const runs = parseRtf(rtf).map((r) => ({ ...r, size: r.size * scale }))
         texts.push({ ...fr, text: runs.map((r) => r.text).join(''), fontSize: (runs[0]?.size ?? 24 * scale), runs, z })
-      }
+      } else skip('text box')
+    } else {
+      skip('item (unknown kind)')
     }
   }
   return { kind: 'canvas', strokes, fills, images, texts }
@@ -270,29 +312,69 @@ function readStroke(e: View): Stroke | OutlineInk | null {
 }
 
 /**
- * Strokes snapped to a shape (e.g. a straight line) have no ink payload; the shape is in field 9:
- * {1: {1: point, 1: point, ...}, 5: {2: type}, 15: width}. Drawn as a polyline through its points.
+ * Strokes snapped to a shape have no ink payload; the shape is in field 9, with the pen width in
+ * field 15 and one of:
+ * - 1: polyline {1: point, 1: point, ...} (lines, arrows, triangles, rectangles)
+ * - 2: arc {1: start, 2: a point halfway along, 3: end}
+ * - 3: ellipse {1: centre, 2: width and height}
  */
 function readShape(e: View): Stroke | null {
   const shape = e.msg(9)
-  const pts = shape?.msg(1)
-  if (!shape || !pts) return null
+  if (!shape) return null
   const { dx, dy, color } = strokeStyle(e)
-  const points: [number, number][] = []
-  for (const f of pts.fields) {
-    if (f.f !== 1 || f.t !== 2) continue
-    const p = View.try(f.v)
-    if (p) points.push([p.num(1) + dx, p.num(2) + dy])
-  }
-  if (points.length < 2 || !points.flat().every(Number.isFinite)) return null
-  const segments: number[] = []
-  for (let k = 1; k < points.length; k++) {
-    const [ax, ay] = points[k - 1]
-    const [bx, by] = points[k]
-    segments.push((ax + bx) / 2, (ay + by) / 2, bx, by) // straight segment as a degenerate quadratic
-  }
+  const pt = (v: View | null | undefined): [number, number] | null => (v ? [v.num(1) + dx, v.num(2) + dy] : null)
   const width = shape.num(15, 1.56)
-  return { color, width: width > 0 ? width : 1.56, start: points[0], segments }
+  const style = { color, width: width > 0 ? width : 1.56 }
+  const valid = (s: Stroke) => (s.start.every(Number.isFinite) && s.segments.every(Number.isFinite) ? s : null)
+
+  const poly = shape.msg(1)
+  if (poly) {
+    const points: [number, number][] = []
+    for (const f of poly.fields) {
+      if (f.f !== 1 || f.t !== 2) continue
+      const p = pt(View.try(f.v))
+      if (p) points.push(p)
+    }
+    if (points.length < 2) return null
+    const segments: number[] = []
+    for (let k = 1; k < points.length; k++) {
+      const [ax, ay] = points[k - 1]
+      const [bx, by] = points[k]
+      segments.push((ax + bx) / 2, (ay + by) / 2, bx, by) // straight segment as a degenerate quadratic
+    }
+    return valid({ ...style, start: points[0], segments })
+  }
+
+  const arc = shape.msg(2)
+  if (arc) {
+    const a = pt(arc.msg(1))
+    const m = pt(arc.msg(2))
+    const b = pt(arc.msg(3))
+    if (!a || !m || !b) return null
+    // the quadratic curve that passes through the middle point halfway along
+    const c = [2 * m[0] - (a[0] + b[0]) / 2, 2 * m[1] - (a[1] + b[1]) / 2]
+    return valid({ ...style, start: a, segments: [c[0], c[1], b[0], b[1]] })
+  }
+
+  const ellipse = shape.msg(3)
+  if (ellipse) {
+    const centre = pt(ellipse.msg(1))
+    const size = ellipse.msg(2)
+    if (!centre || !size) return null
+    const [cx, cy] = centre
+    const rx = size.num(1) / 2
+    const ry = size.num(2) / 2
+    // eight 45° quadratic segments; the control points sit at the corners of a circumscribed octagon
+    const k = 1 / Math.cos(Math.PI / 8)
+    const segments: number[] = []
+    for (let i = 1; i <= 8; i++) {
+      const mid = (i - 0.5) * (Math.PI / 4)
+      const end = i * (Math.PI / 4)
+      segments.push(cx + rx * k * Math.cos(mid), cy + ry * k * Math.sin(mid), cx + rx * Math.cos(end), cy + ry * Math.sin(end))
+    }
+    return valid({ ...style, start: [cx + rx, cy], segments })
+  }
+  return null
 }
 
 interface OutlineInk {

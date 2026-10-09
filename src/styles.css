@@ -538,3 +538,13 @@ fieldset.settings:disabled {
 .notice .check {
   margin-top: 8px;
 }
+
+.notice.warning {
+  background: color-mix(in srgb, var(--warn) 12%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+}
+
+.notice.warning ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
