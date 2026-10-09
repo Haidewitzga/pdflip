@@ -1,6 +1,7 @@
-import { PDFDocument, PDFFont, PDFImage, PDFPage, rgb, StandardFonts } from 'pdf-lib'
+import { PDFDocument, PDFImage, PDFPage, rgb } from 'pdf-lib'
+import { FontBook, PLAIN, type FontStyle } from './fonts'
 import { CARD_GAP, FRAME_INSET, LABEL_BAND } from './pdflipLayout'
-import { CARD_H, CARD_W, type CanvasImage, type Deck, type FilledInk, type Side, type Stroke } from './goodnotes/model'
+import { CARD_H, CARD_W, type CanvasImage, type Deck, type FilledInk, type Side, type Stroke, type TextBox } from './goodnotes/model'
 
 export type PdfLayout = 'pages' | 'stacked'
 
@@ -16,6 +17,11 @@ export interface PdfOptions {
    * PNG decoding inside pdf-lib is slow for large images.
    */
   convertImage?: (data: Uint8Array) => Promise<Uint8Array | null>
+  /**
+   * Loads a TrueType font covering Greek, maths and other symbols. Only called when the deck has
+   * text the built-in PDF font cannot show (e.g. θ, Ω, ∑); without it such characters become "?".
+   */
+  loadUnicodeFont?: () => Promise<Uint8Array>
 }
 
 /** Lets the browser repaint (progress, spinners) between chunks of work. */
@@ -27,7 +33,7 @@ export async function deckToPdf(deck: Deck, opts: PdfOptions): Promise<Uint8Arra
   const pdf = await PDFDocument.create()
   pdf.setTitle(deck.title)
   pdf.setCreator('PDFlip')
-  const font = await pdf.embedFont(StandardFonts.Helvetica)
+  const fonts = new FontBook(pdf, opts.loadUnicodeFont)
   const images = new Map<Uint8Array, PDFImage | null>()
   const embed = async (data: Uint8Array) => {
     if (!images.has(data)) {
@@ -44,17 +50,17 @@ export async function deckToPdf(deck: Deck, opts: PdfOptions): Promise<Uint8Arra
     if (opts.layout === 'pages') {
       for (const [side, what] of [[card.front, 'Question'], [card.back, 'Answer']] as const) {
         const page = pdf.addPage([CARD_W, CARD_H + band])
-        if (opts.labels) drawLabel(page, font, label(what), CARD_H + band)
-        await drawCard(page, font, side, 0, CARD_H, 1, embed)
+        if (opts.labels) await drawLabel(page, fonts, label(what), CARD_H + band)
+        await drawCard(page, fonts, side, 0, CARD_H, 1, embed)
       }
     } else {
       const h = band + CARD_H + CARD_GAP + band + CARD_H
       const page = pdf.addPage([CARD_W, h])
       let top = h
       for (const [side, what] of [[card.front, 'Question'], [card.back, 'Answer']] as const) {
-        if (opts.labels) drawLabel(page, font, label(what), top)
+        if (opts.labels) await drawLabel(page, fonts, label(what), top)
         top -= band
-        await drawCard(page, font, side, 0, top, 1, embed)
+        await drawCard(page, fonts, side, 0, top, 1, embed)
         top -= CARD_H + CARD_GAP
       }
     }
@@ -64,14 +70,18 @@ export async function deckToPdf(deck: Deck, opts: PdfOptions): Promise<Uint8Arra
   return pdf.save()
 }
 
-function drawLabel(page: PDFPage, font: PDFFont, text: string, top: number) {
-  page.drawText(safeText(font, text), { x: 24, y: top - 32, size: 16, font, color: rgb(0.45, 0.45, 0.5) })
+async function drawLabel(page: PDFPage, fonts: FontBook, text: string, top: number) {
+  let x = 24
+  for (const seg of await fonts.segments(text, PLAIN)) {
+    page.drawText(seg.text, { x, y: top - 32, size: 16, font: seg.font, color: rgb(0.45, 0.45, 0.5) })
+    x += seg.font.widthOfTextAtSize(seg.text, 16)
+  }
 }
 
 type Embed = (data: Uint8Array) => Promise<PDFImage | null>
 
 /** Draws one card side with its top-left corner at (x, top) in PDF coordinates. */
-async function drawCard(page: PDFPage, font: PDFFont, side: Side, x: number, top: number, scale: number, embed: Embed) {
+async function drawCard(page: PDFPage, fonts: FontBook, side: Side, x: number, top: number, scale: number, embed: Embed) {
   const W = CARD_W * scale
   const H = CARD_H * scale
   page.drawRectangle({
@@ -97,21 +107,73 @@ async function drawCard(page: PDFPage, font: PDFFont, side: Side, x: number, top
   }
 
   if (side.kind === 'text') {
-    drawCentredText(page, font, side.text, x + W / 2, top - H / 2, W - 160 * scale, 48 * scale)
+    await drawCentredText(page, fonts, side.text, x + W / 2, top - H / 2, W - 160 * scale, 48 * scale)
     return
   }
 
   await drawInk(page, side, x, top, scale, embed)
 
   // Text boxes go on top of everything else.
-  for (const t of side.texts) {
-    let size = t.fontSize * scale
-    const lines = t.text.split('\n').map((l) => safeText(font, l))
-    const widest = () => Math.max(0, ...lines.map((l) => font.widthOfTextAtSize(l, size)))
-    while (size > 6 && widest() > t.w * scale * 1.05) size -= 1
-    lines.forEach((line, k) => {
-      page.drawText(line, { x: x + t.x * scale, y: top - t.y * scale - size * (k + 1) * 1.05, size, font, color: rgb(0, 0, 0) })
-    })
+  for (const t of side.texts) await drawTextBox(page, fonts, t, x, top, scale)
+}
+
+interface Word {
+  text: string
+  style: FontStyle
+  size: number
+  color: [number, number, number]
+  width: number
+  space: boolean
+}
+
+/**
+ * Draws a text box with its fonts, bold/italic, sizes and colours, wrapping lines at the box width
+ * like Goodnotes does. Fonts are the closest standard PDF fonts (see FontBook).
+ */
+async function drawTextBox(page: PDFPage, fonts: FontBook, t: TextBox, x: number, top: number, scale: number) {
+  const runs = t.runs?.length
+    ? t.runs
+    : [{ text: t.text, ...PLAIN, size: t.fontSize, color: [0, 0, 0] as [number, number, number] }]
+  const maxW = t.w * scale * 1.08 // small tolerance: the standard fonts are a little wider than Helvetica Neue
+  const lines: Word[][] = [[]]
+  let lineW = 0
+  for (const run of runs) {
+    const size = run.size * scale
+    for (const piece of run.text.replace(/\t/g, ' ').split(/(\n| +)/)) {
+      if (!piece) continue
+      if (piece === '\n') {
+        lines.push([])
+        lineW = 0
+        continue
+      }
+      const space = piece.trim() === ''
+      const line = lines[lines.length - 1]
+      if (space && line.length === 0) continue
+      const width = await fonts.width(piece, run, size)
+      if (!space && line.some((w) => !w.space) && lineW + width > maxW) {
+        while (line.length && line[line.length - 1].space) line.pop()
+        lines.push([])
+        lineW = 0
+      }
+      lines[lines.length - 1].push({ text: piece, style: run, size, color: run.color, width, space })
+      lineW += width
+    }
+  }
+
+  let lineTop = top - t.y * scale
+  let lastSize = (runs[0]?.size ?? 24) * scale
+  for (const line of lines) {
+    const size = line.length ? Math.max(...line.map((w) => w.size)) : lastSize
+    lastSize = size
+    const baseline = lineTop - size * 1.05
+    let cx = x + t.x * scale
+    for (const w of line) {
+      for (const seg of await fonts.segments(w.text, w.style)) {
+        page.drawText(seg.text, { x: cx, y: baseline, size: w.size, font: seg.font, color: rgb(...w.color) })
+        cx += seg.font.widthOfTextAtSize(seg.text, w.size)
+      }
+    }
+    lineTop -= size * 1.2
   }
 }
 
@@ -210,13 +272,13 @@ async function nativeDeflate(data: Uint8Array): Promise<Uint8Array | null> {
   }
 }
 
-function drawCentredText(page: PDFPage, font: PDFFont, text: string, cx: number, cy: number, maxW: number, size: number) {
-  const words = safeText(font, text).split(/\s+/).filter(Boolean)
+async function drawCentredText(page: PDFPage, fonts: FontBook, text: string, cx: number, cy: number, maxW: number, size: number) {
+  const words = text.split(/\s+/).filter(Boolean)
   const lines: string[] = []
   let cur = ''
   for (const w of words) {
     const t = cur ? `${cur} ${w}` : w
-    if (cur && font.widthOfTextAtSize(t, size) > maxW) {
+    if (cur && (await fonts.width(t, PLAIN, size)) > maxW) {
       lines.push(cur)
       cur = w
     } else cur = t
@@ -224,24 +286,13 @@ function drawCentredText(page: PDFPage, font: PDFFont, text: string, cx: number,
   if (cur) lines.push(cur)
   const lh = size * 1.2
   const y0 = cy + ((lines.length - 1) * lh) / 2 - size * 0.35
-  lines.forEach((l, k) => {
-    const w = font.widthOfTextAtSize(l, size)
-    page.drawText(l, { x: cx - w / 2, y: y0 - k * lh, size, font, color: rgb(0, 0, 0) })
-  })
-}
-
-/** Replaces characters the standard PDF font cannot encode. */
-function safeText(font: PDFFont, s: string): string {
-  let out = ''
-  for (const ch of s) {
-    try {
-      font.encodeText(ch)
-      out += ch
-    } catch {
-      out += '?'
+  for (const [k, l] of lines.entries()) {
+    let lx = cx - (await fonts.width(l, PLAIN, size)) / 2
+    for (const seg of await fonts.segments(l, PLAIN)) {
+      page.drawText(seg.text, { x: lx, y: y0 - k * lh, size, font: seg.font, color: rgb(0, 0, 0) })
+      lx += seg.font.widthOfTextAtSize(seg.text, size)
     }
   }
-  return out
 }
 
 async function embedImage(pdf: PDFDocument, data: Uint8Array): Promise<PDFImage | null> {

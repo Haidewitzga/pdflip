@@ -2,6 +2,7 @@ import JSZip from 'jszip'
 import { readStream, tryParse, View } from '../pb'
 import { decodeBv41 } from '../lz4'
 import { uuidPlusOne } from '../uuid'
+import { parseRtf } from '../rtf'
 import type { CanvasImage, Card, Deck, FilledInk, RGBA, Side, Stroke, TextBox } from './model'
 
 const STROKE_SIGNATURE = 'vuA(v)A(S(uu))A(S(uuuu))vA(f)'
@@ -20,6 +21,7 @@ function newer(a: Clock, b: Clock): boolean {
 }
 
 interface CardState {
+  deleted?: Versioned
   order?: Versioned
   front?: Versioned
   back?: Versioned
@@ -41,6 +43,7 @@ export async function readDeck(file: ArrayBuffer | Uint8Array): Promise<Deck> {
   if (!events) throw new Error('This .goodnotes file has no event log (index.events.pb).')
 
   let title = 'Flashcards'
+  let titleClock: Clock = [-1n, 0n]
   const cards = new Map<string, CardState>()
 
   for (const m of readStream(events)) {
@@ -50,8 +53,24 @@ export async function readDeck(file: ArrayBuffer | Uint8Array): Promise<Deck> {
     if (!body || body.t !== 2) continue
     const e = View.try(body.v)
     if (!e) continue
-    if (body.f === 30) {
-      title = e.msg(2)?.str(1) ?? title
+    if (body.f === 30 || body.f === 31) {
+      // 30 creates the document, 31 renames it; the newest clock wins
+      const t = e.msg(2)
+      const name = t?.str(1)
+      const clock = clockOf(t?.msg(2) ?? null)
+      if (name && newer(clock, titleClock)) {
+        title = name
+        titleClock = clock
+      }
+    } else if (body.f === 153) {
+      // card deleted (or restored): {3: {1: 1 = deleted, 2: clock}}
+      const id = e.str(1)
+      const value = e.msg(3)
+      if (!id || !value) continue
+      const state = cards.get(id) ?? {}
+      cards.set(id, state)
+      const clock = clockOf(value.msg(2))
+      if (!state.deleted || newer(clock, state.deleted.clock)) state.deleted = { clock, value }
     } else if (body.f === 151 || body.f === 152) {
       const id = e.str(1)
       if (!id) continue
@@ -71,9 +90,10 @@ export async function readDeck(file: ArrayBuffer | Uint8Array): Promise<Deck> {
     }
   }
 
-  if (cards.size === 0) throw new Error('No flashcards found in this file. Is it a flashcard deck?')
+  const live = [...cards.values()].filter((c) => c.deleted?.value.int(1) !== 1n && (c.front || c.back || c.order))
+  if (live.length === 0) throw new Error('No flashcards found in this file. Is it a flashcard deck?')
 
-  const ordered = [...cards.values()].sort((a, b) => {
+  const ordered = live.sort((a, b) => {
     const ka = a.order?.value.str(1) ?? ''
     const kb = b.order?.value.str(1) ?? ''
     return ka < kb ? -1 : ka > kb ? 1 : 0
@@ -112,6 +132,8 @@ export const UNSUPPORTED_SIDE = '[PDFlip cannot read this card side yet]'
 
 async function readCanvas(data: Uint8Array, read: (n: string) => Promise<Uint8Array | undefined>): Promise<Side> {
   const deleted = new Set<string>()
+  /** Element id → attachment file named in its header (decks re-saved by Goodnotes use field 7). */
+  const headerFiles = new Map<string, string>()
   const elements: [number, View][] = []
   for (const m of data.length ? readStream(data) : []) {
     const p = tryParse(m)
@@ -121,6 +143,8 @@ async function readCanvas(data: Uint8Array, read: (n: string) => Promise<Uint8Ar
       // element header; field 3 = 1 marks an erased element
       const h = new View(p)
       if (h.int(3) === 1n) deleted.add(h.str(1)!)
+      const file = h.str(7)
+      if (file) headerFiles.set(h.str(1)!, file)
       continue
     }
     if (first.t !== 2) continue
@@ -148,15 +172,19 @@ async function readCanvas(data: Uint8Array, read: (n: string) => Promise<Uint8Ar
       }
     } else if (kind === 1 && e.has(4)) {
       const fr = frame(e.msg(2))
+      // Field 4 names the attachment in decks PDFlip wrote; after Goodnotes re-saves a deck it holds
+      // an internal image id instead and the header's field 7 names the file.
       const att = e.str(4)
-      const bytes = att ? await read('attachments/' + att) : undefined
+      const file = id ? headerFiles.get(id) : undefined
+      const bytes = (att ? await read('attachments/' + att) : undefined) ?? (file ? await read('attachments/' + file) : undefined)
       if (fr && bytes) images.push({ ...fr, data: bytes, z })
     } else if (kind === 8) {
       const fr = frame(e.msg(2))
       const rtf = e.str(6)
       if (fr && rtf) {
         const scale = e.msg(4)?.num(1, 1) || 1
-        texts.push({ ...fr, text: rtfToText(rtf), fontSize: rtfFontSize(rtf) * scale, z })
+        const runs = parseRtf(rtf).map((r) => ({ ...r, size: r.size * scale }))
+        texts.push({ ...fr, text: runs.map((r) => r.text).join(''), fontSize: (runs[0]?.size ?? 24 * scale), runs, z })
       }
     }
   }
@@ -348,23 +376,9 @@ function readOutline(e: View, h: Uint8Array): OutlineInk | null {
   return { lines: lines.filter(finite), fill: subpaths.length ? { color, subpaths } : null }
 }
 
-/** Extracts plain text from the simple RTF Goodnotes writes for text boxes. */
+/** Plain text of the RTF Goodnotes writes for text boxes. */
 export function rtfToText(rtf: string): string {
-  // Content starts after the last colour switch of the header.
-  const marker = rtf.lastIndexOf('\\cf')
-  let body = marker >= 0 ? rtf.slice(marker).replace(/^\\cf\d+ ?/, '') : rtf
-  body = body
-    .replace(/\\'([0-9a-f]{2})/gi, (_, h) => new TextDecoder('windows-1252').decode(new Uint8Array([parseInt(h, 16)])))
-    .replace(/\\uc0\\u(-?\d+) ?/g, (_, d) => String.fromCharCode((Number(d) + 65536) % 65536))
-    .replace(/\\u(-?\d+)\??/g, (_, d) => String.fromCharCode((Number(d) + 65536) % 65536))
-    .replace(/\\\n/g, '\n')
-    .replace(/\\par\b ?/g, '\n')
-    .replace(/\\[a-z]+-?\d* ?/gi, '')
-    .replace(/[{}]/g, '')
-  return body.trim()
-}
-
-function rtfFontSize(rtf: string): number {
-  const m = rtf.match(/\\fs(\d+)/)
-  return m ? Number(m[1]) / 2 : 24
+  return parseRtf(rtf)
+    .map((r) => r.text)
+    .join('')
 }

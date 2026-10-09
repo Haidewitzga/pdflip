@@ -55,6 +55,11 @@ export default function GoodnotesToPdf() {
         layout,
         labels,
         convertImage: pngToJpeg,
+        loadUnicodeFont: () =>
+          fetch(`${import.meta.env.BASE_URL}fonts/DejaVuSans.ttf`).then(async (r) => {
+            if (!r.ok) throw new Error('font not available')
+            return new Uint8Array(await r.arrayBuffer())
+          }),
         onProgress: (done, total) => setStatus(done === total ? { step: 'saving' } : { step: 'creating', done, total }),
       })
       const preview = await renderPreview(pdf, layout === 'pages' ? 2 : 1).catch(() => [])

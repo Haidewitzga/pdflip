@@ -43,4 +43,5 @@ The file format notes are in [docs/FORMAT.md](docs/FORMAT.md).
 
 ## License
 
-MIT
+MIT. The bundled DejaVu Sans font (`public/fonts/`) is under its own free license, see
+`public/fonts/LICENSE-DejaVu.txt`.

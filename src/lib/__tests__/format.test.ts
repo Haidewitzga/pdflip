@@ -3,13 +3,14 @@ import { describe, expect, it } from 'vitest'
 import JSZip from 'jszip'
 import { Msg, readStream, View, writeStream } from '../pb'
 import { decodeBv41 } from '../lz4'
+import { parseRtf, classifyFont } from '../rtf'
 import { uuidPlusOne } from '../uuid'
 import { readDeck, rtfToText } from '../goodnotes/read'
 import { fractionalKeys, writeDeck } from '../goodnotes/write'
 import { deckToPdf } from '../deckToPdf'
 import { autoMarks, pairMarks, restorePdflipCards, splitPages } from '../pairing'
 import { detectPdflipLayout, pdflipRegions } from '../pdflipLayout'
-import { PDFDocument } from 'pdf-lib'
+import { PDFDocument, PDFName } from 'pdf-lib'
 
 // 1×1 transparent PNG
 const PNG = Uint8Array.from(
@@ -249,6 +250,111 @@ describe('PDFlip round trip', () => {
     expect(card.front).toEqual({ page: 1, ...top })
     expect(card.back).toEqual({ page: 1, ...bottom })
     expect(top.target.w).toBeGreaterThan(1170)
+  })
+})
+
+describe('deleted cards and symbols', () => {
+  const textSide = (t: string) => new Msg().bytes(1, new Msg().bytes(1, new Msg().bytes(1, 'text/plain').bytes(2, t))).bytes(2, new Msg().int(1, 1).int(2, 5))
+  const card = (id: string, order: string, q: string) =>
+    new Msg().bytes(1, id).bytes(152, new Msg().bytes(1, id).bytes(3, new Msg().bytes(1, order)).bytes(4, textSide(q)).bytes(5, textSide('a')))
+  const del = (id: string, flag: number, counter: number) =>
+    new Msg().bytes(1, id).bytes(153, new Msg().bytes(1, id).bytes(3, new Msg().int(1, flag).bytes(2, new Msg().int(1, counter).int(2, 1))))
+
+  it('skips deleted cards and keeps restored ones', async () => {
+    const zip = new JSZip()
+    zip.file('index.events.pb', writeStream([card('A', 'a', 'kept'), card('B', 'b', 'deleted'), card('C', 'c', 'restored'), del('B', 1, 1), del('C', 1, 1), del('C', 0, 2)]))
+    const deck = await readDeck(await zip.generateAsync({ type: 'uint8array' }))
+    expect(deck.cards.map((c) => (c.front.kind === 'text' ? c.front.text : ''))).toEqual(['kept', 'restored'])
+  })
+
+  it('embeds a Unicode font only when the text needs one', async () => {
+    let loads = 0
+    const loadUnicodeFont = async () => {
+      loads++
+      return new Uint8Array(readFileSync('public/fonts/DejaVuSans.ttf'))
+    }
+    const deck = (t: string) => ({ title: 't', cards: [{ front: { kind: 'text' as const, text: t }, back: { kind: 'text' as const, text: 'x' } }] })
+    await deckToPdf(deck('plain'), { layout: 'pages', labels: false, loadUnicodeFont })
+    expect(loads).toBe(0)
+    const pdf = await deckToPdf(deck('θ, Ω, ∑'), { layout: 'pages', labels: false, loadUnicodeFont })
+    expect(loads).toBe(1)
+    const loaded = await PDFDocument.load(pdf)
+    const baseFonts = loaded.context
+      .enumerateIndirectObjects()
+      .map(([, obj]) => (obj as { get?: (k: unknown) => unknown }).get?.(PDFName.of('BaseFont'))?.toString() ?? '')
+    expect(baseFonts.some((n) => n.includes('DejaVuSans'))).toBe(true)
+  })
+})
+
+describe('text box formatting', () => {
+  const rtf = [
+    '{\\rtf1\\ansi\\ansicpg1252\\cocoartf2867',
+    '\\cocoatextscaling1\\cocoaplatform1{\\fonttbl\\f0\\fnil\\fcharset0 HelveticaNeue;\\f1\\fnil\\fcharset0 HelveticaNeue-Bold;\\f2\\froman\\fcharset0 Times-Italic;}',
+    '{\\colortbl;\\red255\\green255\\blue255;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}',
+    '{\\*\\expandedcolortbl;;\\cssrgb\\c0\\c0\\c0;\\cssrgb\\c100000\\c0\\c0;}',
+    '\\pard\\tx560\\partightenfactor0',
+    '',
+    '\\f0\\fs48 \\cf2 Plain \\f1 bold\\f0  and \\cf3 red\\cf2 \\',
+    '\\f2\\fs36 next \\i0\\b line \\uc0\\u952 }',
+  ].join('\n')
+
+  it('reads fonts, bold, italic, sizes, colours and line breaks', () => {
+    const runs = parseRtf(rtf)
+    expect(runs.map((r) => r.text).join('')).toBe('Plain bold and red\nnext line θ')
+    const at = (t: string) => runs.find((r) => r.text.includes(t))!
+    expect(at('Plain')).toMatchObject({ family: 'sans', bold: false, italic: false, size: 24, color: [0, 0, 0] })
+    expect(at('bold')).toMatchObject({ family: 'sans', bold: true })
+    expect(at('red')).toMatchObject({ color: [1, 0, 0] })
+    expect(at('next')).toMatchObject({ family: 'serif', italic: true, size: 18 })
+    expect(at('line')).toMatchObject({ family: 'serif', bold: true })
+  })
+
+  it('maps font names to families', () => {
+    expect(classifyFont('Menlo-Regular').family).toBe('mono')
+    expect(classifyFont('Georgia-BoldItalic')).toEqual({ family: 'serif', bold: true, italic: true })
+    expect(classifyFont('Avenir-Book').family).toBe('sans')
+  })
+
+  it('draws styled text boxes', async () => {
+    const runs = parseRtf(rtf)
+    const side = { kind: 'canvas' as const, strokes: [], fills: [], images: [], texts: [{ x: 50, y: 50, w: 600, h: 200, text: 'x', fontSize: 24, runs }] }
+    const pdf = await deckToPdf({ title: 't', cards: [{ front: side, back: side }] }, {
+      layout: 'pages',
+      labels: false,
+      loadUnicodeFont: async () => new Uint8Array(readFileSync('public/fonts/DejaVuSans.ttf')),
+    })
+    const loaded = await PDFDocument.load(pdf)
+    const baseFonts = loaded.context
+      .enumerateIndirectObjects()
+      .map(([, obj]) => (obj as { get?: (k: unknown) => unknown }).get?.(PDFName.of('BaseFont'))?.toString() ?? '')
+    for (const f of ['/Helvetica', '/Helvetica-Bold', '/Times-Italic', '/Times-BoldItalic']) expect(baseFonts).toContain(f)
+  })
+})
+
+describe('decks re-saved by Goodnotes', () => {
+  it('finds images through the header and applies renames', async () => {
+    const canvas = 'C0000000-0000-5000-8000-000000000010'
+    const elemId = 'E0000000-0000-4000-8000-000000000001'
+    const rect = new Msg().bytes(1, new Msg().f32(1, 1).f32(2, 2)).bytes(2, new Msg().f32(1, 3).f32(2, 4))
+    // header names the file in field 7; the element's field 4 is an internal image id
+    const header = new Msg().bytes(1, elemId).bytes(4, 'IMAGE-ID').bytes(7, 'FILE')
+    const image = new Msg().bytes(1, new Msg().bytes(1, elemId).bytes(2, rect).bytes(4, 'IMAGE-ID'))
+    const side = (content: Msg) => new Msg().bytes(1, content).bytes(2, new Msg().int(1, 1).int(2, 5))
+    const card = new Msg()
+      .bytes(1, 'CARD')
+      .bytes(3, new Msg().bytes(1, 'A'))
+      .bytes(4, side(new Msg().bytes(3, new Msg().bytes(1, canvas))))
+      .bytes(5, side(new Msg().bytes(1, new Msg().bytes(1, 'text/plain').bytes(2, 'x'))))
+    const title = (kind: number, name: string, counter: number) =>
+      new Msg().bytes(1, 'DOC').bytes(kind, new Msg().bytes(1, 'DOC').bytes(2, new Msg().bytes(1, name).bytes(2, new Msg().int(1, counter).int(2, 1))))
+    const zip = new JSZip()
+    zip.file('index.events.pb', writeStream([title(30, 'Old', 1), new Msg().bytes(1, 'CARD').bytes(152, card), title(31, 'New', 3)]))
+    zip.file('notes/' + uuidPlusOne(canvas), writeStream([header, image]))
+    zip.file('attachments/FILE', PNG)
+    const deck = await readDeck(await zip.generateAsync({ type: 'uint8array' }))
+    expect(deck.title).toBe('New')
+    const front = deck.cards[0].front
+    expect(front.kind === 'canvas' && front.images[0]).toMatchObject({ x: 1, y: 2, w: 3, h: 4, data: PNG })
   })
 })
 
