@@ -7,6 +7,8 @@ export const imprint = {
   city: '',
   country: '',
   email: '',
+  /** GitHub username shown as the contact on the imprint page. */
+  github: 'Haidewitzga',
 }
 
 /** Goodnotes versions PDFlip has been tested with. */

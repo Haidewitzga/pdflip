@@ -62,9 +62,16 @@ export function Imprint() {
           <br />
           E-Mail: <a href={`mailto:${imprint.email}`}>{imprint.email}</a>
         </address>
-      ) : (
-        <p className="muted">Contact details will be added here.</p>
+      ) : null}
+      {imprint.github && (
+        <p>
+          Contact:{' '}
+          <a href={`https://github.com/${imprint.github}`} target="_blank" rel="noreferrer">
+            github.com/{imprint.github}
+          </a>
+        </p>
       )}
+      {!filled && !imprint.github && <p className="muted">Contact details will be added here.</p>}
       <h2>About this project</h2>
       <p>
         PDFlip is a free, non-commercial, open-source tool. It is not affiliated with, endorsed by, or connected to
