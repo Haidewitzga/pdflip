@@ -79,5 +79,8 @@ laid out with no padding: `u16`, `f32` pen width (sign ignored), then ten arrays
 - Layer 1, arrays 1–3: commands in array 1. `0` = move (x, y from array 2), `1` = quadratic curve
   (cx, cy, x, y from array 3); these are stroked with the pen width. `2` (x, y, width from array 2)
   and `3` (6 values from array 3) describe dots, which layer 2 draws.
-- Layer 2, arrays 4–8: the dots' filled outline. Commands in array 5 (2 = new subpath, 4 = cubic
-  curve), one start point per subpath in array 6 and the curve points (3 per curve) in array 8.
+- Layer 2, arrays 4–10: the filled outline. Commands in array 5 (2 = new subpath, 4 = cubic
+  curve, 5 = arc), one start point per subpath in array 6 and the curve points (3 per curve) in
+  array 8. An arc (used for round stroke ends) takes cx, cy, radius, start angle and end angle
+  from array 9 and a direction from array 10 (1 = angle decreasing; y points down); it continues
+  from the current point.

@@ -201,6 +201,25 @@ describe('ink formats', () => {
     const pdf = await deckToPdf({ title: 't', cards: [{ front: side, back: side }] }, { layout: 'pages', labels: false })
     expect(pdf.length).toBeGreaterThan(500)
   })
+
+  it('reads round stroke ends stored as arcs', async () => {
+    const arr16 = (xs: number[]) => [...u32(xs.length), ...xs.flatMap(u16)]
+    const arr32 = (xs: number[]) => [...u32(xs.length), ...xs.flatMap(f32)]
+    // one subpath at (10, 0), then a half circle around the origin from angle 0 to π, angle decreasing
+    const payload = [
+      ...u16(2), ...u32(0),
+      ...arr16([]), ...arr32([]), ...arr32([]), ...arr16([]),
+      ...arr16([2, 5]), ...arr32([10, 0]), ...arr32([]), ...arr32([]), ...arr32([0, 0, 10, 0, Math.PI]), ...arr16([1]),
+    ]
+    const blob = bv41(tpl('vuA(v)A(u)A(u)A(v)A(v)A(u)A(u)A(u)A(u)A(v)', payload))
+    const stroke = new Msg().bytes(1, 'S3').bytes(2, blob).bytes(4, new Msg().f32(4, 1))
+    const side = (await readDeck(await deckWithStroke(stroke))).cards[0].front
+    const curves = side.kind === 'canvas' ? side.fills[0].subpaths[0].curves : []
+    expect(curves.length).toBe(12) // two quarter circles
+    const near = (xs: number[]) => xs.map((v) => Math.round(v * 1000) / 1000 + 0)
+    expect(near(curves.slice(4, 6))).toEqual([0, -10]) // through the top (y points down)
+    expect(near(curves.slice(10, 12))).toEqual([-10, 0])
+  })
 })
 
 describe('layering', () => {
