@@ -14,7 +14,6 @@ export function Privacy() {
           So that PDFlip also opens without internet, your browser keeps a copy of the website's own files (about 4 MB).
           It contains none of your files. Deleting the website data in your browser settings removes it.
         </li>
-        <li>The deck format you last chose (Goodnotes or Anki) is remembered in your browser. It is never sent anywhere.</li>
       </ul>
       <h2>Hosting</h2>
       <p>
