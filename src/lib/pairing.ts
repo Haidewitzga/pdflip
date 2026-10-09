@@ -1,13 +1,12 @@
 import type { CardSpec, SideSpec } from './pdfToCards'
 import { pdflipRegions, type PdflipLayout } from './pdflipLayout'
 
-export type Mode = 'alternate' | 'top-bottom' | 'left-right' | 'manual'
+export type Mode = 'alternate' | 'top-bottom' | 'manual'
 export type Mark = 'Q' | 'A' | 'skip'
 
 export const MODES: { id: Mode; label: string; hint: string }[] = [
   { id: 'alternate', label: 'Page pairs', hint: 'Page 1 = question, page 2 = answer, page 3 = question, …' },
   { id: 'top-bottom', label: 'Top / bottom', hint: 'Each page is one card: top half = question, bottom half = answer.' },
-  { id: 'left-right', label: 'Left / right', hint: 'Each page is one card: left half = question, right half = answer.' },
   { id: 'manual', label: 'Mark pages', hint: 'Tap pages to cycle Question → Answer → Skip. Each question pairs with the next answer.' },
 ]
 
@@ -53,14 +52,12 @@ export function pairMarks(marks: Mark[]): Pairing {
   return { cards, unpaired }
 }
 
-/** One card per page, split into two halves. */
-export function splitPages(pageCount: number, mode: 'top-bottom' | 'left-right', skipped: Set<number> = new Set()): CardSpec[] {
+/** One card per page: top half = question, bottom half = answer. */
+export function splitPages(pageCount: number, skipped: Set<number> = new Set()): CardSpec[] {
   const cards: CardSpec[] = []
   for (let page = 1; page <= pageCount; page++) {
     if (skipped.has(page)) continue
-    if (mode === 'top-bottom')
-      cards.push({ front: { page, crop: { x: 0, y: 0, w: 1, h: 0.5 } }, back: { page, crop: { x: 0, y: 0.5, w: 1, h: 0.5 } } })
-    else cards.push({ front: { page, crop: { x: 0, y: 0, w: 0.5, h: 1 } }, back: { page, crop: { x: 0.5, y: 0, w: 0.5, h: 1 } } })
+    cards.push({ front: { page, crop: { x: 0, y: 0, w: 1, h: 0.5 } }, back: { page, crop: { x: 0, y: 0.5, w: 1, h: 0.5 } } })
   }
   return cards
 }
