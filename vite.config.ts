@@ -53,7 +53,8 @@ function serviceWorker(): Plugin {
         readdirSync(dir, { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? walk(join(dir, d.name)) : [join(dir, d.name)]))
       const files = walk(outDir)
         .map((f) => relative(outDir, f).split(sep).join('/'))
-        .filter((f) => f !== 'sw.js')
+        // character maps are loaded only when a PDF needs one (the service worker keeps those)
+        .filter((f) => f !== 'sw.js' && !f.startsWith('cmaps/'))
         .sort()
       const hash = createHash('sha256')
       for (const f of files) hash.update(f).update(readFileSync(join(outDir, f)))
@@ -61,6 +62,37 @@ function serviceWorker(): Plugin {
         .replace('__VERSION__', `${Date.now().toString(36)}-${hash.digest('hex').slice(0, 12)}`)
         .replace('__FILES__', JSON.stringify(['./', ...files.filter((f) => f !== 'index.html'), 'index.html']))
       writeFileSync(join(outDir, 'sw.js'), sw)
+    },
+  }
+}
+
+/**
+ * pdf.js's character maps (CMaps), served as cmaps/<name>.bcmap. PDFs whose Chinese, Japanese or
+ * Korean fonts are not embedded need one or two of them; pdfToCards.ts loads them only then.
+ */
+const CMAP_DIR = 'node_modules/pdfjs-dist/cmaps'
+
+function characterMaps(): Plugin {
+  let base = '/'
+  return {
+    name: 'character-maps',
+    configResolved: (config) => {
+      base = config.base
+    },
+    configureServer: (server) => {
+      server.middlewares.use(`${base}cmaps/`, (req, res, next) => {
+        const name = decodeURIComponent((req.url ?? '').split('?')[0].slice(1))
+        if (!/^[\w.-]+\.bcmap$/.test(name)) return next()
+        try {
+          res.end(readFileSync(join(CMAP_DIR, name)))
+        } catch {
+          next()
+        }
+      })
+    },
+    generateBundle() {
+      for (const name of readdirSync(CMAP_DIR).filter((f) => f.endsWith('.bcmap')))
+        this.emitFile({ type: 'asset', fileName: `cmaps/${name}`, source: readFileSync(join(CMAP_DIR, name)) })
     },
   }
 }
@@ -78,6 +110,6 @@ function buildVersion(): string {
 // Served from https://<user>.github.io/pdflip/
 export default defineConfig({
   base: '/pdflip/',
-  plugins: [react(), contentSecurityPolicy(), serviceWorker()],
+  plugins: [react(), contentSecurityPolicy(), characterMaps(), serviceWorker()],
   define: { __PDFLIP_VERSION__: JSON.stringify(buildVersion()), __PDFLIP_REPORT_URL__: JSON.stringify(relayUrl) },
 })

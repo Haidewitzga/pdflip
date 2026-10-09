@@ -18,7 +18,7 @@ user's browser ──(tap "Send report")──▶ relay (Cloudflare Worker) ─�
 
 | Kind | When | Where |
 |---|---|---|
-| `missing-character-map` | pdf.js asks for a character map (CMap) PDFlip does not ship, so Chinese/Japanese/Korean text in a PDF without embedded fonts goes missing | `openPdf` in `src/lib/pdfToCards.ts` |
+| `missing-character-map` | pdf.js needs a character map (CMap) that PDFlip cannot load (not among the ones it ships, or offline before it was ever needed), so Chinese/Japanese/Korean text in a PDF without embedded fonts goes missing | `openPdf` in `src/lib/pdfToCards.ts` |
 | `pdf-reader-warning` | pdf.js gives up on part of a PDF (an image, a font, a feature) and logs a warning | `src/lib/pdfWorker.ts` forwards the worker's warnings |
 | `unsupported-characters` | card text has characters no bundled font can draw (shown as "?") | `FontBook` in `src/lib/fonts.ts` |
 | `unreadable-part` | the Goodnotes reader skips a part it does not understand (pen type, element kind, image format, card side) | `skip()` in `src/lib/goodnotes/read.ts` |

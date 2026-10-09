@@ -57,7 +57,7 @@ export function missingCharacterMapProblem(cmaps: string[], pdfjsVersion: string
     area: 'pdf-to-goodnotes',
     kind: 'missing-character-map',
     signature: `pdf.missing-cmap:${slug(cmaps.join('+'))}`,
-    title: `PDF needs character maps PDFlip does not ship: ${cmaps.join(', ')}`.slice(0, 140),
+    title: `PDF needs character maps PDFlip could not load: ${cmaps.join(', ')}`.slice(0, 140),
     message: 'This PDF uses a font PDFlip cannot display yet, so some of its text will be missing from your cards.',
     details: { characterMaps: cmaps, pdfjs: pdfjsVersion },
   }
