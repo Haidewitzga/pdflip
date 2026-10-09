@@ -65,6 +65,21 @@ export default function PdfToGoodnotes() {
     }
   }
 
+  function clearFile() {
+    loadId.current++
+    setDoc(null)
+    setFileName('')
+    setTitle('')
+    setThumbs([])
+    setThumbsDone(0)
+    setAspects([])
+    setPdflip(null)
+    setSkipped(new Set())
+    setMarks([])
+    setResult(null)
+    setError('')
+  }
+
   function chooseMode(m: Mode) {
     if (m === 'manual' && mode !== 'manual') setMarks(autoMarks(pageCount, skipped))
     setMode(m)
@@ -140,7 +155,14 @@ export default function PdfToGoodnotes() {
       </p>
 
       <fieldset className="settings" disabled={!!progress}>
-        <FilePicker accept="application/pdf,.pdf" label={fileName || 'Choose a PDF'} onFile={onFile} hint="or drop a PDF here" />
+        <FilePicker
+          accept="application/pdf,.pdf"
+          label={fileName ? 'Choose another PDF' : 'Choose a PDF'}
+          onFile={onFile}
+          hint="or drop a PDF here"
+          fileName={fileName}
+          onClear={clearFile}
+        />
       </fieldset>
 
       {error && <p className="error" role="alert">{error}</p>}

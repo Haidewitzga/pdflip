@@ -40,6 +40,13 @@ export default function GoodnotesToPdf() {
     }
   }
 
+  function clearFile() {
+    setDeck(null)
+    setFileName('')
+    setError('')
+    setStatus({ step: 'empty' })
+  }
+
   /** Any change to the settings invalidates a finished PDF. */
   function change(fn: () => void) {
     fn()
@@ -81,7 +88,13 @@ export default function GoodnotesToPdf() {
       </p>
 
       <fieldset className="settings" disabled={working}>
-        <FilePicker label={fileName || 'Choose a .goodnotes file'} hint="or drop it here" onFile={onFile} />
+        <FilePicker
+          label={fileName ? 'Choose another file' : 'Choose a .goodnotes file'}
+          hint="or drop it here"
+          onFile={onFile}
+          fileName={fileName}
+          onClear={clearFile}
+        />
       </fieldset>
 
       {error && <p className="error" role="alert">{error}</p>}
