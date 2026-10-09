@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { readDeck } from '../lib/goodnotes/read'
 import { readGoodnotesFile } from '../lib/fileCheck'
-import type { Deck } from '../lib/goodnotes/model'
+import type { Deck, Skipped } from '../lib/goodnotes/model'
 import { deckToPdf, type PdfLayout } from '../lib/deckToPdf'
 import { pngToJpeg } from '../lib/browserImages'
 import { canShareFiles, download, safeFilename, share } from '../lib/download'
@@ -108,6 +108,8 @@ export default function GoodnotesToPdf() {
             <strong>{deck.title}</strong> · {deck.cards.length} card{deck.cards.length === 1 ? '' : 's'}
           </p>
 
+          {deck.skipped && deck.skipped.length > 0 && <SkippedNotice skipped={deck.skipped} />}
+
           <fieldset className="settings" disabled={working}>
             <h2>1. Choose a layout</h2>
             <div className="modes" role="radiogroup" aria-label="PDF layout">
@@ -165,6 +167,34 @@ export default function GoodnotesToPdf() {
         </>
       )}
     </section>
+  )
+}
+
+const SHOWN = 8
+
+/** Lists the parts of cards that could not be read and will be missing from the PDF. */
+function SkippedNotice({ skipped }: { skipped: Skipped[] }) {
+  const plural = (n: number, what: string) => {
+    if (n === 1) return `1 ${what}`
+    // pluralise the noun before any "(…)" note, e.g. "image (HEIC)" → "images (HEIC)"
+    const [noun, ...rest] = what.split(' (')
+    return `${n} ${noun}${/(s|x)$/.test(noun) ? 'es' : 's'}${rest.length ? ' (' + rest.join(' (') : ''}`
+  }
+  return (
+    <div className="notice warning" role="status">
+      <p>
+        <strong>Some parts could not be read</strong> and will be missing from the PDF. They are still in your Goodnotes
+        deck.
+      </p>
+      <ul>
+        {skipped.slice(0, SHOWN).map((s) => (
+          <li key={`${s.card}-${s.side}-${s.what}`}>
+            Card {s.card}, {s.side}: {plural(s.count, s.what)}
+          </li>
+        ))}
+        {skipped.length > SHOWN && <li>…and {skipped.length - SHOWN} more</li>}
+      </ul>
+    </div>
   )
 }
 

@@ -223,6 +223,43 @@ describe('ink formats', () => {
   })
 })
 
+describe('snapped shapes and skipped parts', () => {
+  const empty = tpl('vuA(v)A(S(uu))A(S(uuuu))vA(f)', [...u16(2), ...f32(1.5), ...u32(0), ...u32(0), ...u32(0), ...u16(1), ...u32(0)])
+  const point = (x: number, y: number) => new Msg().f32(1, x).f32(2, y)
+  const shapeStroke = (shape: Msg) => new Msg().bytes(1, 'S').bytes(2, bv41(empty)).bytes(4, new Msg().f32(4, 1)).bytes(9, shape.f32(15, 2))
+
+  it('reads ellipses by centre and size', async () => {
+    const shape = new Msg().bytes(3, new Msg().bytes(1, point(100, 50)).bytes(2, point(40, 20)))
+    const deck = await readDeck(await deckWithStroke(shapeStroke(shape)))
+    const s = deck.cards[0].front.kind === 'canvas' ? deck.cards[0].front.strokes[0] : undefined
+    expect(s?.start).toEqual([120, 50])
+    const ends = s!.segments.filter((_, k) => k % 4 >= 2)
+    const xs = ends.filter((_, k) => k % 2 === 0)
+    const ys = ends.filter((_, k) => k % 2 === 1)
+    expect([Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)].map(Math.round)).toEqual([80, 120, 40, 60])
+    expect(deck.skipped).toEqual([])
+  })
+
+  it('reads arcs through their middle point', async () => {
+    const shape = new Msg().bytes(2, new Msg().bytes(1, point(0, 0)).bytes(2, point(50, 25)).bytes(3, point(100, 0)))
+    const s = (await readDeck(await deckWithStroke(shapeStroke(shape)))).cards[0].front
+    // a quadratic through (50, 25) at its middle has its control point at (50, 50)
+    expect(s.kind === 'canvas' && s.strokes[0]).toMatchObject({ start: [0, 0], segments: [50, 50, 100, 0] })
+  })
+
+  it('lists parts it could not read', async () => {
+    const unknownShape = shapeStroke(new Msg().bytes(7, new Msg().int(1, 1)))
+    const deck = await readDeck(await deckWithStroke(unknownShape))
+    expect(deck.skipped).toEqual([{ card: 1, side: 'question', what: 'pen stroke', count: 1 }])
+  })
+
+  it('explains that a file without flashcards is not a deck', async () => {
+    const zip = new JSZip()
+    zip.file('index.events.pb', writeStream([new Msg().bytes(1, 'DOC').bytes(30, new Msg().bytes(1, 'DOC'))]))
+    await expect(readDeck(await zip.generateAsync({ type: 'uint8array' }))).rejects.toThrow('no flashcards')
+  })
+})
+
 describe('layering', () => {
   it('orders canvas elements by their layer counter, not their file position', async () => {
     const canvas = 'C0000000-0000-5000-8000-000000000010'

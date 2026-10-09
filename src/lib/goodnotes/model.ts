@@ -57,7 +57,19 @@ export interface Card {
   back: Side
 }
 
+/** Something on a card that PDFlip could not read and left out of the PDF. */
+export interface Skipped {
+  /** 1-based card number. */
+  card: number
+  side: 'question' | 'answer'
+  /** What was left out, e.g. "pen stroke" or "image (HEIC)". */
+  what: string
+  count: number
+}
+
 export interface Deck {
   title: string
   cards: Card[]
+  /** Parts of cards that could not be read. Empty when everything was understood. */
+  skipped?: Skipped[]
 }
