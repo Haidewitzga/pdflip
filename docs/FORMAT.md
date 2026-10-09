@@ -28,6 +28,7 @@ Mutable values are `{1: value, 2: clock}` with `clock = {1: counter, 2: random u
 | Kind | Meaning | Key fields |
 |---|---|---|
 | 30 | Document | `2: {1: title}`, `9: locale` |
+| 31 | Document renamed | `2: {1: title, 2: clock}` (newest clock wins) |
 | 6 | Attachment | `1, 2: attachment id`, `5: size`, `6: document id` |
 | 2 | Card template page | `4: background PDF attachment`, `8: {1: 1193.28, 2: 745.8}` size, `9: template id` |
 | 54 | Canvas (one card side) | `2: canvas id`, `3: {1: page id}`, `4: {1: order key}` |
@@ -44,7 +45,8 @@ a picture `{2: {1: "image/jpeg", 2: attachment id}}` or a canvas reference `{3: 
 Each element is preceded by a header `{1: element id, 2: clock, 3: 1 if erased, 8: device, 9: seq, 14: 5381, 16: 24}`.
 The element message is `{<kind>: element}`:
 
-- **1 – image**: `2: frame {1: {x, y}, 2: {w, h}}`, `3: {center, size}`, `4: attachment id`
+- **1 – image**: `2: frame {1: {x, y}, 2: {w, h}}`, `3: {center, size}`, `4: attachment id`. In decks Goodnotes has
+  re-saved, field 4 is an internal image id and the element's header names the attachment file in field `7`.
 - **7 – ink stroke**: `2: bv41 blob`, `4: colour {1: r, 2: g, 3: b, 4: a}` (zeros omitted), `6: offset {1: dx, 2: dy}`,
   `14: 1` if erased
 - **8 – text box**: `2: frame`, `4: transform {1: scale, ...}`, `6: RTF text`

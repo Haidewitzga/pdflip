@@ -252,6 +252,33 @@ describe('PDFlip round trip', () => {
   })
 })
 
+describe('decks re-saved by Goodnotes', () => {
+  it('finds images through the header and applies renames', async () => {
+    const canvas = 'C0000000-0000-5000-8000-000000000010'
+    const elemId = 'E0000000-0000-4000-8000-000000000001'
+    const rect = new Msg().bytes(1, new Msg().f32(1, 1).f32(2, 2)).bytes(2, new Msg().f32(1, 3).f32(2, 4))
+    // header names the file in field 7; the element's field 4 is an internal image id
+    const header = new Msg().bytes(1, elemId).bytes(4, 'IMAGE-ID').bytes(7, 'FILE')
+    const image = new Msg().bytes(1, new Msg().bytes(1, elemId).bytes(2, rect).bytes(4, 'IMAGE-ID'))
+    const side = (content: Msg) => new Msg().bytes(1, content).bytes(2, new Msg().int(1, 1).int(2, 5))
+    const card = new Msg()
+      .bytes(1, 'CARD')
+      .bytes(3, new Msg().bytes(1, 'A'))
+      .bytes(4, side(new Msg().bytes(3, new Msg().bytes(1, canvas))))
+      .bytes(5, side(new Msg().bytes(1, new Msg().bytes(1, 'text/plain').bytes(2, 'x'))))
+    const title = (kind: number, name: string, counter: number) =>
+      new Msg().bytes(1, 'DOC').bytes(kind, new Msg().bytes(1, 'DOC').bytes(2, new Msg().bytes(1, name).bytes(2, new Msg().int(1, counter).int(2, 1))))
+    const zip = new JSZip()
+    zip.file('index.events.pb', writeStream([title(30, 'Old', 1), new Msg().bytes(1, 'CARD').bytes(152, card), title(31, 'New', 3)]))
+    zip.file('notes/' + uuidPlusOne(canvas), writeStream([header, image]))
+    zip.file('attachments/FILE', PNG)
+    const deck = await readDeck(await zip.generateAsync({ type: 'uint8array' }))
+    expect(deck.title).toBe('New')
+    const front = deck.cards[0].front
+    expect(front.kind === 'canvas' && front.images[0]).toMatchObject({ x: 1, y: 2, w: 3, h: 4, data: PNG })
+  })
+})
+
 // Optional check against a real Goodnotes export: GOODNOTES_SAMPLE=/path/to/deck.goodnotes npm test
 const sample = process.env.GOODNOTES_SAMPLE
 describe.skipIf(!sample || !existsSync(sample))('real Goodnotes deck', () => {
