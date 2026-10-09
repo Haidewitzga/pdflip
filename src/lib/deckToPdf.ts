@@ -1,4 +1,5 @@
 import { PDFDocument, PDFFont, PDFImage, PDFPage, rgb, StandardFonts } from 'pdf-lib'
+import fontkit from '@pdf-lib/fontkit'
 import { CARD_GAP, FRAME_INSET, LABEL_BAND } from './pdflipLayout'
 import { CARD_H, CARD_W, type CanvasImage, type Deck, type FilledInk, type Side, type Stroke } from './goodnotes/model'
 
@@ -16,6 +17,34 @@ export interface PdfOptions {
    * PNG decoding inside pdf-lib is slow for large images.
    */
   convertImage?: (data: Uint8Array) => Promise<Uint8Array | null>
+  /**
+   * Loads a TrueType font covering Greek, maths and other symbols. Only called when the deck has
+   * text the built-in PDF font cannot show (e.g. θ, Ω, ∑); without it such characters become "?".
+   */
+  loadUnicodeFont?: () => Promise<Uint8Array>
+}
+
+/** All typed text in a deck, used to decide whether a Unicode font is needed. */
+function deckText(deck: Deck): string {
+  const parts = [deck.title]
+  for (const c of deck.cards)
+    for (const s of [c.front, c.back]) {
+      if (s.kind === 'text') parts.push(s.text)
+      else if (s.kind === 'canvas') parts.push(...s.texts.map((t) => t.text))
+    }
+  return parts.join('')
+}
+
+function canEncodeAll(font: PDFFont, text: string): boolean {
+  for (const ch of new Set(text)) {
+    if (ch === '\n') continue
+    try {
+      font.encodeText(ch)
+    } catch {
+      return false
+    }
+  }
+  return true
 }
 
 /** Lets the browser repaint (progress, spinners) between chunks of work. */
@@ -27,7 +56,15 @@ export async function deckToPdf(deck: Deck, opts: PdfOptions): Promise<Uint8Arra
   const pdf = await PDFDocument.create()
   pdf.setTitle(deck.title)
   pdf.setCreator('PDFlip')
-  const font = await pdf.embedFont(StandardFonts.Helvetica)
+  let font = await pdf.embedFont(StandardFonts.Helvetica)
+  if (opts.loadUnicodeFont && !canEncodeAll(font, deckText(deck))) {
+    try {
+      pdf.registerFontkit(fontkit)
+      font = await pdf.embedFont(await opts.loadUnicodeFont(), { subset: true })
+    } catch {
+      // keep Helvetica; unsupported characters are replaced with "?"
+    }
+  }
   const images = new Map<Uint8Array, PDFImage | null>()
   const embed = async (data: Uint8Array) => {
     if (!images.has(data)) {

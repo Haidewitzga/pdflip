@@ -9,7 +9,7 @@ import { fractionalKeys, writeDeck } from '../goodnotes/write'
 import { deckToPdf } from '../deckToPdf'
 import { autoMarks, pairMarks, restorePdflipCards, splitPages } from '../pairing'
 import { detectPdflipLayout, pdflipRegions } from '../pdflipLayout'
-import { PDFDocument } from 'pdf-lib'
+import { PDFDocument, PDFName } from 'pdf-lib'
 
 // 1×1 transparent PNG
 const PNG = Uint8Array.from(
@@ -249,6 +249,39 @@ describe('PDFlip round trip', () => {
     expect(card.front).toEqual({ page: 1, ...top })
     expect(card.back).toEqual({ page: 1, ...bottom })
     expect(top.target.w).toBeGreaterThan(1170)
+  })
+})
+
+describe('deleted cards and symbols', () => {
+  const textSide = (t: string) => new Msg().bytes(1, new Msg().bytes(1, new Msg().bytes(1, 'text/plain').bytes(2, t))).bytes(2, new Msg().int(1, 1).int(2, 5))
+  const card = (id: string, order: string, q: string) =>
+    new Msg().bytes(1, id).bytes(152, new Msg().bytes(1, id).bytes(3, new Msg().bytes(1, order)).bytes(4, textSide(q)).bytes(5, textSide('a')))
+  const del = (id: string, flag: number, counter: number) =>
+    new Msg().bytes(1, id).bytes(153, new Msg().bytes(1, id).bytes(3, new Msg().int(1, flag).bytes(2, new Msg().int(1, counter).int(2, 1))))
+
+  it('skips deleted cards and keeps restored ones', async () => {
+    const zip = new JSZip()
+    zip.file('index.events.pb', writeStream([card('A', 'a', 'kept'), card('B', 'b', 'deleted'), card('C', 'c', 'restored'), del('B', 1, 1), del('C', 1, 1), del('C', 0, 2)]))
+    const deck = await readDeck(await zip.generateAsync({ type: 'uint8array' }))
+    expect(deck.cards.map((c) => (c.front.kind === 'text' ? c.front.text : ''))).toEqual(['kept', 'restored'])
+  })
+
+  it('embeds a Unicode font only when the text needs one', async () => {
+    let loads = 0
+    const loadUnicodeFont = async () => {
+      loads++
+      return new Uint8Array(readFileSync('public/fonts/DejaVuSans.ttf'))
+    }
+    const deck = (t: string) => ({ title: 't', cards: [{ front: { kind: 'text' as const, text: t }, back: { kind: 'text' as const, text: 'x' } }] })
+    await deckToPdf(deck('plain'), { layout: 'pages', labels: false, loadUnicodeFont })
+    expect(loads).toBe(0)
+    const pdf = await deckToPdf(deck('θ, Ω, ∑'), { layout: 'pages', labels: false, loadUnicodeFont })
+    expect(loads).toBe(1)
+    const loaded = await PDFDocument.load(pdf)
+    const baseFonts = loaded.context
+      .enumerateIndirectObjects()
+      .map(([, obj]) => (obj as { get?: (k: unknown) => unknown }).get?.(PDFName.of('BaseFont'))?.toString() ?? '')
+    expect(baseFonts.some((n) => n.includes('DejaVuSans'))).toBe(true)
   })
 })
 

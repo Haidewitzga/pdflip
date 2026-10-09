@@ -20,6 +20,7 @@ function newer(a: Clock, b: Clock): boolean {
 }
 
 interface CardState {
+  deleted?: Versioned
   order?: Versioned
   front?: Versioned
   back?: Versioned
@@ -52,6 +53,15 @@ export async function readDeck(file: ArrayBuffer | Uint8Array): Promise<Deck> {
     if (!e) continue
     if (body.f === 30) {
       title = e.msg(2)?.str(1) ?? title
+    } else if (body.f === 153) {
+      // card deleted (or restored): {3: {1: 1 = deleted, 2: clock}}
+      const id = e.str(1)
+      const value = e.msg(3)
+      if (!id || !value) continue
+      const state = cards.get(id) ?? {}
+      cards.set(id, state)
+      const clock = clockOf(value.msg(2))
+      if (!state.deleted || newer(clock, state.deleted.clock)) state.deleted = { clock, value }
     } else if (body.f === 151 || body.f === 152) {
       const id = e.str(1)
       if (!id) continue
@@ -71,9 +81,10 @@ export async function readDeck(file: ArrayBuffer | Uint8Array): Promise<Deck> {
     }
   }
 
-  if (cards.size === 0) throw new Error('No flashcards found in this file. Is it a flashcard deck?')
+  const live = [...cards.values()].filter((c) => c.deleted?.value.int(1) !== 1n && (c.front || c.back || c.order))
+  if (live.length === 0) throw new Error('No flashcards found in this file. Is it a flashcard deck?')
 
-  const ordered = [...cards.values()].sort((a, b) => {
+  const ordered = live.sort((a, b) => {
     const ka = a.order?.value.str(1) ?? ''
     const kb = b.order?.value.str(1) ?? ''
     return ka < kb ? -1 : ka > kb ? 1 : 0
