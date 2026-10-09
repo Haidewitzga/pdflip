@@ -1,4 +1,5 @@
-import type { CardSpec } from './pdfToCards'
+import type { CardSpec, SideSpec } from './pdfToCards'
+import { pdflipRegions, type PdflipLayout } from './pdflipLayout'
 
 export type Mode = 'alternate' | 'top-bottom' | 'left-right' | 'manual'
 export type Mark = 'Q' | 'A' | 'skip'
@@ -62,4 +63,18 @@ export function splitPages(pageCount: number, mode: 'top-bottom' | 'left-right',
     else cards.push({ front: { page, crop: { x: 0, y: 0, w: 0.5, h: 1 } }, back: { page, crop: { x: 0.5, y: 0, w: 0.5, h: 1 } } })
   }
   return cards
+}
+
+/**
+ * For PDFs made by PDFlip: replace each side's crop with the exact card area of its page, so the
+ * card comes back at its original size instead of shrinking the whole page (label band and frame
+ * included) onto a new card. In the one-page-per-card layout the top card is the question.
+ */
+export function restorePdflipCards(cards: CardSpec[], layout: PdflipLayout): CardSpec[] {
+  const regions = pdflipRegions(layout)
+  const side = (s: SideSpec): SideSpec => {
+    const r = regions.length === 1 ? regions[0] : regions[(s.crop?.y ?? 0) < 0.5 ? 0 : 1]
+    return { page: s.page, crop: r.crop, target: r.target }
+  }
+  return cards.map((c) => ({ front: side(c.front), back: side(c.back) }))
 }

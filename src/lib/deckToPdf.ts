@@ -1,4 +1,5 @@
 import { PDFDocument, PDFFont, PDFImage, PDFPage, rgb, StandardFonts } from 'pdf-lib'
+import { CARD_GAP, FRAME_INSET, LABEL_BAND } from './pdflipLayout'
 import { CARD_H, CARD_W, type CanvasImage, type Deck, type FilledInk, type Side, type Stroke } from './goodnotes/model'
 
 export type PdfLayout = 'pages' | 'stacked'
@@ -20,8 +21,6 @@ export interface PdfOptions {
 /** Lets the browser repaint (progress, spinners) between chunks of work. */
 const yieldToUi = () => new Promise<void>((r) => setTimeout(r, 0))
 
-const LABEL_BAND = 48
-const GAP = 36
 
 /** Renders a flashcard deck to a PDF. */
 export async function deckToPdf(deck: Deck, opts: PdfOptions): Promise<Uint8Array> {
@@ -49,14 +48,14 @@ export async function deckToPdf(deck: Deck, opts: PdfOptions): Promise<Uint8Arra
         await drawCard(page, font, side, 0, CARD_H, 1, embed)
       }
     } else {
-      const h = band + CARD_H + GAP + band + CARD_H
+      const h = band + CARD_H + CARD_GAP + band + CARD_H
       const page = pdf.addPage([CARD_W, h])
       let top = h
       for (const [side, what] of [[card.front, 'Question'], [card.back, 'Answer']] as const) {
         if (opts.labels) drawLabel(page, font, label(what), top)
         top -= band
         await drawCard(page, font, side, 0, top, 1, embed)
-        top -= CARD_H + GAP
+        top -= CARD_H + CARD_GAP
       }
     }
     opts.onProgress?.(i + 1, total)
@@ -76,10 +75,10 @@ async function drawCard(page: PDFPage, font: PDFFont, side: Side, x: number, top
   const W = CARD_W * scale
   const H = CARD_H * scale
   page.drawRectangle({
-    x: x + 6,
-    y: top - H + 6,
-    width: W - 12,
-    height: H - 12,
+    x: x + FRAME_INSET,
+    y: top - H + FRAME_INSET,
+    width: W - 2 * FRAME_INSET,
+    height: H - 2 * FRAME_INSET,
     color: rgb(1, 1, 1),
     borderColor: rgb(0.85, 0.85, 0.88),
     borderWidth: 2,

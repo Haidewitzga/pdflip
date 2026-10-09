@@ -7,7 +7,9 @@ import { uuidPlusOne } from '../uuid'
 import { readDeck, rtfToText } from '../goodnotes/read'
 import { fractionalKeys, writeDeck } from '../goodnotes/write'
 import { deckToPdf } from '../deckToPdf'
-import { autoMarks, pairMarks, splitPages } from '../pairing'
+import { autoMarks, pairMarks, restorePdflipCards, splitPages } from '../pairing'
+import { detectPdflipLayout, pdflipRegions } from '../pdflipLayout'
+import { PDFDocument } from 'pdf-lib'
 
 // 1×1 transparent PNG
 const PNG = Uint8Array.from(
@@ -223,6 +225,30 @@ describe('layering', () => {
     const front = (await readDeck(await zip.generateAsync({ type: 'uint8array' }))).cards[0].front
     if (front.kind !== 'canvas') throw new Error('expected canvas')
     expect(front.images[0].z!).toBeLessThan(front.strokes[0].z!)
+  })
+})
+
+describe('PDFlip round trip', () => {
+  it('recognises every PDFlip page layout from the exported page sizes', async () => {
+    const side = { kind: 'text' as const, text: 'x' }
+    const deck = { title: 't', cards: [{ front: side, back: side }] }
+    for (const layout of ['pages', 'stacked'] as const) {
+      for (const labels of [true, false]) {
+        const pdf = await PDFDocument.load(await deckToPdf(deck, { layout, labels }))
+        const sizes = pdf.getPages().map((p) => ({ w: p.getWidth(), h: p.getHeight() }))
+        expect(detectPdflipLayout(sizes)).toEqual({ layout, labels })
+      }
+    }
+    expect(detectPdflipLayout([{ w: 595, h: 842 }])).toBeNull()
+  })
+
+  it('maps each side to its card area at full size', () => {
+    const stacked = { layout: 'stacked' as const, labels: true }
+    const [card] = restorePdflipCards(splitPages(1, 'top-bottom'), stacked)
+    const [top, bottom] = pdflipRegions(stacked)
+    expect(card.front).toEqual({ page: 1, ...top })
+    expect(card.back).toEqual({ page: 1, ...bottom })
+    expect(top.target.w).toBeGreaterThan(1170)
   })
 })
 
