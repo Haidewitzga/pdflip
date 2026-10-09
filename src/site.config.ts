@@ -9,4 +9,4 @@ export const repo = 'Haidewitzga/pdflip'
  * 'https://pdflip-reports.<account>.workers.dev'. Empty: the report button opens a pre-filled
  * GitHub issue page instead. The build also allows this address in the Content Security Policy.
  */
-export const reportUrl: string = ''
+export const reportUrl: string = 'https://pdflip-reports.haidewitzga.workers.dev'
