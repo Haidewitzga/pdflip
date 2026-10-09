@@ -27,6 +27,19 @@ interface CardState {
   back?: Versioned
 }
 
+const MAX_ENTRIES = 100_000
+const MAX_UNPACKED_BYTES = 2 * 1024 ** 3
+
+/** Refuses archives that would unpack to far more than any real deck (a "zip bomb"). */
+function checkArchiveSize(zip: JSZip) {
+  const files = Object.values(zip.files)
+  if (files.length > MAX_ENTRIES) throw new Error('This .goodnotes file has too many entries.')
+  // JSZip keeps each entry's declared size from the zip directory here.
+  const size = (f: JSZip.JSZipObject) => (f as unknown as { _data?: { uncompressedSize?: number } })._data?.uncompressedSize ?? 0
+  const total = files.reduce((sum, f) => sum + size(f), 0)
+  if (total > MAX_UNPACKED_BYTES) throw new Error('This .goodnotes file is too large to open.')
+}
+
 /** Reads a flashcard deck from a .goodnotes file. */
 export async function readDeck(file: ArrayBuffer | Uint8Array): Promise<Deck> {
   let zip: JSZip
@@ -35,6 +48,7 @@ export async function readDeck(file: ArrayBuffer | Uint8Array): Promise<Deck> {
   } catch {
     throw new Error('This is not a .goodnotes file (it is not a zip archive).')
   }
+  checkArchiveSize(zip)
   const read = async (name: string) => {
     const f = zip.file(name)
     return f ? f.async('uint8array') : undefined

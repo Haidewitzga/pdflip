@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { openPdf, pageSizes, pdfToDeck, renderPage, type CardSpec, type PdfDoc } from '../lib/pdfToCards'
+import { readPdfFile } from '../lib/fileCheck'
 import { detectPdflipLayout, type PdflipLayout } from '../lib/pdflipLayout'
 import { autoMarks, MODES, pairMarks, restorePdflipCards, splitPages, type Mark, type Mode } from '../lib/pairing'
 import { canShareFiles, download, safeFilename, share } from '../lib/download'
@@ -32,7 +33,7 @@ export default function PdfToGoodnotes() {
     setResult(null)
     const id = ++loadId.current
     try {
-      const d = await openPdf(await file.arrayBuffer())
+      const d = await openPdf(await readPdfFile(file))
       if (id !== loadId.current) return
       const sizes = await pageSizes(d)
       const made = detectPdflipLayout(sizes)
@@ -157,7 +158,7 @@ export default function PdfToGoodnotes() {
       <fieldset className="settings" disabled={!!progress}>
         <FilePicker
           accept="application/pdf,.pdf"
-          label={fileName ? 'Choose another PDF' : 'Choose a PDF'}
+          label="Choose a PDF"
           onFile={onFile}
           hint="or drop a PDF here"
           fileName={fileName}
