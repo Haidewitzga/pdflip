@@ -42,9 +42,9 @@ export async function pageSizes(doc: PdfDoc): Promise<{ w: number; h: number }[]
 export const PDFJS_VERSION = pdfjs.version
 
 /**
- * Character maps (CMaps) a PDF asked for while it was drawn. PDFs with fonts that are not embedded
- * in the file, typically Chinese, Japanese or Korean text, need them; PDFlip does not ship any yet,
- * so that text is missing from the rendered pages. Filled while pages are rendered.
+ * Character maps (CMaps) a PDF asked for while it was drawn but that could not be loaded. PDFs with
+ * fonts that are not embedded in the file, typically Chinese, Japanese or Korean text, need them;
+ * without one that text is missing from the rendered pages. Filled while pages are rendered.
  */
 const missingCMaps = new WeakMap<PdfDoc, Set<string>>()
 const warningsOf = new WeakMap<PdfDoc, Set<string>>()
@@ -56,6 +56,18 @@ export function missingCharacterMaps(doc: PdfDoc): string[] {
 /** Warnings pdf.js gave while reading and drawing this PDF (filled while pages are rendered). */
 export function readerWarnings(doc: PdfDoc): string[] {
   return [...(warningsOf.get(doc) ?? [])]
+}
+
+/**
+ * pdf.js's character maps, copied to cmaps/ by the build (vite.config.ts). They are not part of the
+ * offline copy, about 1.7 MB in all: a PDF loads the few it needs, and the service worker keeps those.
+ */
+const CMAP_URL = `${import.meta.env.BASE_URL}cmaps/`
+
+async function fetchCMap(name: string): Promise<Uint8Array> {
+  const res = await fetch(`${CMAP_URL}${encodeURIComponent(name)}.bcmap`)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return new Uint8Array(await res.arrayBuffer())
 }
 
 /** Thrown for PDFs that cannot be opened; `technical` carries pdf.js's own message for reports. */
@@ -70,14 +82,19 @@ export class PdfOpenError extends Error {
 
 export async function openPdf(data: ArrayBuffer): Promise<PdfDoc> {
   startWorker()
-  const requested = new Set<string>()
+  const missing = new Set<string>()
   const warnings = new Set<string>()
   collecting = warnings
   // pdf.js asks this factory (on the page, not in its worker) for every character map it needs.
   class RecordingCMapReader {
-    async fetch({ name }: { name: string }): Promise<never> {
-      requested.add(name)
-      throw new Error('Ensure that the `cMapUrl` and `cMapPacked` API parameters are provided.')
+    async fetch({ name }: { name: string }): Promise<{ cMapData: Uint8Array; isCompressed: boolean }> {
+      try {
+        return { cMapData: await fetchCMap(name), isCompressed: true }
+      } catch {
+        // unknown name or offline: the text drawn with it goes missing, and the user can report it
+        missing.add(name)
+        throw new Error('Ensure that the `cMapUrl` and `cMapPacked` API parameters are provided.')
+      }
     }
   }
   try {
@@ -88,7 +105,7 @@ export async function openPdf(data: ArrayBuffer): Promise<PdfDoc> {
       CMapReaderFactory: RecordingCMapReader,
       useWorkerFetch: false,
     }).promise
-    missingCMaps.set(doc, requested)
+    missingCMaps.set(doc, missing)
     warningsOf.set(doc, warnings)
     return doc
   } catch (e) {

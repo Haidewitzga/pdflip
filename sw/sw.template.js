@@ -27,6 +27,20 @@ self.addEventListener('activate', (event) => {
   )
 })
 
+/**
+ * Character maps (cmaps/) are not in FILES because few PDFs need them: one that was needed once is
+ * kept in this version's cache, so the same kind of PDF also opens offline.
+ */
+function fetchAndKeep(req) {
+  return fetch(req).then((res) => {
+    if (res.ok && new URL(req.url).pathname.includes('/cmaps/')) {
+      const copy = res.clone()
+      caches.open(CACHE).then((cache) => cache.put(req, copy))
+    }
+    return res
+  })
+}
+
 self.addEventListener('fetch', (event) => {
   const req = event.request
   if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return
@@ -40,6 +54,6 @@ self.addEventListener('fetch', (event) => {
       : // File names include a content hash, so a match in any kept version is the right file. The
         // server marks files "Vary: Origin", but script requests send an Origin header and the
         // cached copies were fetched without one, so headers must not take part in the match.
-        caches.match(req, { ignoreSearch: true, ignoreVary: true }).then((hit) => hit ?? fetch(req)),
+        caches.match(req, { ignoreSearch: true, ignoreVary: true }).then((hit) => hit ?? fetchAndKeep(req)),
   )
 })
