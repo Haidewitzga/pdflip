@@ -14,6 +14,12 @@ export interface Stroke {
   segments: number[]
 }
 
+/** Ink stored as filled outlines: each subpath is a start point plus cubic curves [c1x, c1y, c2x, c2y, x, y, ...]. */
+export interface FilledInk {
+  color: RGBA
+  subpaths: { start: [number, number]; curves: number[] }[]
+}
+
 export interface CanvasImage {
   x: number
   y: number
@@ -35,7 +41,7 @@ export type Side =
   | { kind: 'text'; text: string }
   /** A picture used as the whole card side (Goodnotes' image button on a card). */
   | { kind: 'image'; data: Uint8Array }
-  | { kind: 'canvas'; strokes: Stroke[]; images: CanvasImage[]; texts: TextBox[] }
+  | { kind: 'canvas'; strokes: Stroke[]; fills: FilledInk[]; images: CanvasImage[]; texts: TextBox[] }
 
 export interface Card {
   front: Side

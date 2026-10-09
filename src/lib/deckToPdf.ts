@@ -1,5 +1,5 @@
 import { PDFDocument, PDFFont, PDFImage, PDFPage, rgb, StandardFonts } from 'pdf-lib'
-import { CARD_H, CARD_W, type Deck, type Side, type Stroke } from './goodnotes/model'
+import { CARD_H, CARD_W, type Deck, type FilledInk, type Side, type Stroke } from './goodnotes/model'
 
 export type PdfLayout = 'pages' | 'stacked'
 
@@ -124,6 +124,7 @@ async function drawCard(page: PDFPage, font: PDFFont, side: Side, x: number, top
   }
 
   await drawStrokes(page, side.strokes, x, top, scale)
+  await drawFills(page, side.fills, x, top, scale)
 }
 
 /**
@@ -175,6 +176,37 @@ async function drawStrokes(page: PDFPage, strokes: Stroke[], x: number, top: num
     ops.push('S Q')
   }
   ops.push('Q')
+  await addRawContent(page, ops)
+}
+
+/** Fills ink stored as outlines, in the same flipped tenth-of-a-point coordinates as strokes. */
+async function drawFills(page: PDFPage, fills: FilledInk[], x: number, top: number, scale: number) {
+  if (fills.length === 0) return
+  const f = (v: number) => (Math.round(v * 1000) / 1000).toString()
+  const t = (v: number) => Math.round(v * 10)
+  const ops: string[] = [`q ${f(scale / 10)} 0 0 ${f(-scale / 10)} ${f(x)} ${f(top)} cm`]
+  for (const ink of fills) {
+    const [r, g, b, a] = ink.color
+    ops.push('q')
+    if (a < 1) {
+      const gs = page.node.newExtGState('GS', page.doc.context.obj({ CA: a, ca: a }))
+      ops.push(`${gs.asString()} gs`)
+    }
+    ops.push(`${f(r)} ${f(g)} ${f(b)} rg`)
+    for (const sp of ink.subpaths) {
+      ops.push(`${t(sp.start[0])} ${t(sp.start[1])} m`)
+      const c = sp.curves
+      for (let k = 0; k + 5 < c.length; k += 6)
+        ops.push(`${t(c[k])} ${t(c[k + 1])} ${t(c[k + 2])} ${t(c[k + 3])} ${t(c[k + 4])} ${t(c[k + 5])} c`)
+      ops.push('h')
+    }
+    ops.push('f Q')
+  }
+  ops.push('Q')
+  await addRawContent(page, ops)
+}
+
+async function addRawContent(page: PDFPage, ops: string[]) {
   const ctx = page.doc.context
   const raw = new TextEncoder().encode(ops.join('\n'))
   const deflated = await nativeDeflate(raw)

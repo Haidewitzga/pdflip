@@ -2,9 +2,10 @@ import JSZip from 'jszip'
 import { readStream, tryParse, View } from '../pb'
 import { decodeBv41 } from '../lz4'
 import { uuidPlusOne } from '../uuid'
-import type { CanvasImage, Card, Deck, RGBA, Side, Stroke, TextBox } from './model'
+import type { CanvasImage, Card, Deck, FilledInk, RGBA, Side, Stroke, TextBox } from './model'
 
 const STROKE_SIGNATURE = 'vuA(v)A(S(uu))A(S(uuuu))vA(f)'
+const OUTLINE_SIGNATURE = 'vuA(v)A(u)A(u)A(v)A(v)A(u)A(u)A(u)A(u)A(v)'
 const ascii = new TextDecoder('latin1')
 
 type Clock = [bigint, bigint]
@@ -128,6 +129,7 @@ async function readCanvas(data: Uint8Array, read: (n: string) => Promise<Uint8Ar
   }
 
   const strokes: Stroke[] = []
+  const fills: FilledInk[] = []
   const images: CanvasImage[] = []
   const texts: TextBox[] = []
   for (const [kind, e] of elements) {
@@ -135,7 +137,8 @@ async function readCanvas(data: Uint8Array, read: (n: string) => Promise<Uint8Ar
     if ((id && deleted.has(id)) || e.int(14) === 1n) continue
     if (kind === 7) {
       const s = readStroke(e)
-      if (s) strokes.push(s)
+      if (s && 'segments' in s) strokes.push(s)
+      else if (s) fills.push(s)
     } else if (kind === 1 && e.has(4)) {
       const fr = frame(e.msg(2))
       const att = e.str(4)
@@ -150,7 +153,7 @@ async function readCanvas(data: Uint8Array, read: (n: string) => Promise<Uint8Ar
       }
     }
   }
-  return { kind: 'canvas', strokes, images, texts }
+  return { kind: 'canvas', strokes, fills, images, texts }
 }
 
 function frame(v: View | null): { x: number; y: number; w: number; h: number } | null {
@@ -160,7 +163,14 @@ function frame(v: View | null): { x: number; y: number; w: number; h: number } |
   return { x: o.num(1), y: o.num(2), w: s.num(1), h: s.num(2) }
 }
 
-function readStroke(e: View): Stroke | null {
+function strokeStyle(e: View) {
+  const off = e.msg(6)
+  const col = e.msg(4)
+  const color: RGBA = [col?.num(1) ?? 0, col?.num(2) ?? 0, col?.num(3) ?? 0, col?.num(4) || 1]
+  return { dx: off?.num(1) ?? 0, dy: off?.num(2) ?? 0, color }
+}
+
+function readStroke(e: View): Stroke | FilledInk | null {
   const blob = e.bytes(2)
   if (!blob) return null
   let raw: Uint8Array
@@ -171,13 +181,16 @@ function readStroke(e: View): Stroke | null {
   }
   // "tpl\0" + u32 length + NUL-terminated type signature + payload
   const nul = raw.indexOf(0, 8)
-  if (nul < 0 || ascii.decode(raw.subarray(8, nul)) !== STROKE_SIGNATURE) return null
+  if (nul < 0) return null
+  const signature = ascii.decode(raw.subarray(8, nul))
+  if (signature === OUTLINE_SIGNATURE) return readOutline(e, raw.subarray(nul + 1))
+  if (signature !== STROKE_SIGNATURE) return null
   const h = raw.subarray(nul + 1)
   const dv = new DataView(h.buffer, h.byteOffset, h.byteLength)
   if (h.length < 10) return null
   const width = dv.getFloat32(2, true)
   const n = dv.getUint32(6, true)
-  if (n === 0) return null
+  if (n === 0) return readShape(e)
   // After the n path-element types comes a small count, then the start point and
   // the quadratic segments; locate it by checking that the lengths add up.
   let q = -1
@@ -191,9 +204,7 @@ function readStroke(e: View): Stroke | null {
     }
   }
   if (q < 0) return null
-  const off = e.msg(6)
-  const dx = off?.num(1) ?? 0
-  const dy = off?.num(2) ?? 0
+  const { dx, dy, color } = strokeStyle(e)
   const start: [number, number] = [dv.getFloat32(q, true) + dx, dv.getFloat32(q + 4, true) + dy]
   const segments: number[] = []
   for (let k = 0; k < m; k++) {
@@ -206,9 +217,85 @@ function readStroke(e: View): Stroke | null {
     )
   }
   if (!segments.every(Number.isFinite) || !start.every(Number.isFinite)) return null
-  const col = e.msg(4)
-  const color: RGBA = [col?.num(1) ?? 0, col?.num(2) ?? 0, col?.num(3) ?? 0, col?.num(4) || 1]
   return { color, width: width > 0 && Number.isFinite(width) ? width : 1.56, start, segments }
+}
+
+/**
+ * Strokes snapped to a shape (e.g. a straight line) have no ink payload; the shape is in field 9:
+ * {1: {1: point, 1: point, ...}, 5: {2: type}, 15: width}. Drawn as a polyline through its points.
+ */
+function readShape(e: View): Stroke | null {
+  const shape = e.msg(9)
+  const pts = shape?.msg(1)
+  if (!shape || !pts) return null
+  const { dx, dy, color } = strokeStyle(e)
+  const points: [number, number][] = []
+  for (const f of pts.fields) {
+    if (f.f !== 1 || f.t !== 2) continue
+    const p = View.try(f.v)
+    if (p) points.push([p.num(1) + dx, p.num(2) + dy])
+  }
+  if (points.length < 2 || !points.flat().every(Number.isFinite)) return null
+  const segments: number[] = []
+  for (let k = 1; k < points.length; k++) {
+    const [ax, ay] = points[k - 1]
+    const [bx, by] = points[k]
+    segments.push((ax + bx) / 2, (ay + by) / 2, bx, by) // straight segment as a degenerate quadratic
+  }
+  const width = shape.num(15, 1.56)
+  return { color, width: width > 0 ? width : 1.56, start: points[0], segments }
+}
+
+/**
+ * Ink stored as filled outlines (some pens and the shape tool). The payload follows its type
+ * signature with no padding: v, u, then ten arrays (u32 count + items). Array 5 holds the path
+ * commands (2 = start a subpath, 4 = cubic curve with 3 points), array 6 one start point per
+ * subpath and array 8 the curve points (1-based).
+ */
+function readOutline(e: View, h: Uint8Array): FilledInk | null {
+  const dv = new DataView(h.buffer, h.byteOffset, h.byteLength)
+  const arrays: { u16?: number[]; f32?: number[] }[] = []
+  let i = 6
+  try {
+    for (const t of ['v', 'u', 'u', 'v', 'v', 'u', 'u', 'u', 'u', 'v']) {
+      const n = dv.getUint32(i, true)
+      i += 4
+      if (n > 1_000_000) return null
+      if (t === 'v') {
+        arrays.push({ u16: Array.from({ length: n }, (_, k) => dv.getUint16(i + 2 * k, true)) })
+        i += 2 * n
+      } else {
+        arrays.push({ f32: Array.from({ length: n }, (_, k) => dv.getFloat32(i + 4 * k, true)) })
+        i += 4 * n
+      }
+    }
+  } catch {
+    return null
+  }
+  if (i !== h.length) return null
+  const commands = arrays[4].u16!
+  const starts = arrays[5].f32!
+  const points = arrays[7].f32!
+  const { dx, dy, color } = strokeStyle(e)
+  const subpaths: FilledInk['subpaths'] = []
+  let s = 0
+  let p = 0
+  for (const c of commands) {
+    if (c === 2) {
+      if (s + 2 > starts.length) return null
+      subpaths.push({ start: [starts[s] + dx, starts[s + 1] + dy], curves: [] })
+      s += 2
+    } else if (c === 4) {
+      const cur = subpaths[subpaths.length - 1]
+      if (!cur || p + 6 > points.length) return null
+      for (let k = 0; k < 6; k += 2) cur.curves.push(points[p + k] + dx, points[p + k + 1] + dy)
+      p += 6
+    } else {
+      return null // a command we have not seen yet
+    }
+  }
+  if (subpaths.length === 0 || !points.every(Number.isFinite)) return null
+  return { color, subpaths }
 }
 
 /** Extracts plain text from the simple RTF Goodnotes writes for text boxes. */

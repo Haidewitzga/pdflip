@@ -36,8 +36,8 @@ Mutable values are `{1: value, 2: clock}` with `clock = {1: counter, 2: random u
 | 152 | Card updated | `1: card id`, `3: order`, `4: front`, `5: back` |
 | 10 / 34 / 150 | Viewing state (last page / settings / last card) | not needed |
 
-A card side is `{1: content, 2: clock}` where content is either typed text
-`{1: {1: "text/plain", 2: text}}` or a canvas reference `{3: {1: canvas id}}`. Cards sort by order key (string).
+A card side is `{1: content, 2: clock}` where content is typed text `{1: {1: "text/plain", 2: text}}`,
+a picture `{2: {1: "image/jpeg", 2: attachment id}}` or a canvas reference `{3: {1: canvas id}}`. Cards sort by order key (string).
 
 ## Canvas elements (`notes/<id>`)
 
@@ -56,3 +56,16 @@ Coordinates are points on a 1193.28 × 745.8 canvas, origin top-left.
 Apple LZ4 (`bv41` blocks, `bv4$` terminator) containing a typed structure `tpl\0`, `u32 length`, the signature
 `vuA(v)A(S(uu))A(S(uuuu))vA(f)\0`, then: `u16`, `f32 width`, `u32 n`, `n × u16` element types, `u32 1`,
 `f32 x, y` start point, `u32 m`, `m × (f32 qx, qy, x, y)` quadratic segments, 6 trailing bytes.
+
+### Strokes snapped to a shape
+
+When the stroke blob has no path elements (`n = 0`) the stroke is a shape in field 9 of the element:
+`{1: {1: {x, y}, 1: {x, y}, ...}, 5: {2: type}, 15: width}` (type 1 = straight line).
+Erased strokes look similar but have `3: 1` in their header.
+
+### Filled outlines
+
+Some ink uses the signature `vuA(v)A(u)A(u)A(v)A(v)A(u)A(u)A(u)A(u)A(v)`, laid out with no padding:
+`u16`, `u32`, then ten arrays (`u32 count` + items). Array 5 is the path commands (2 = new subpath,
+4 = cubic curve), array 6 one start point per subpath, array 8 the curve points (3 per curve).
+The outline is filled with the stroke colour.
