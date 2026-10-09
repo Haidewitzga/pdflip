@@ -552,22 +552,3 @@ fieldset.settings:disabled {
 .modes + .field {
   margin-top: 16px;
 }
-
-.beta {
-  display: inline-block;
-  padding: 1px 7px;
-  border-radius: 999px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  vertical-align: 2px;
-  color: var(--warn);
-  border: 1px solid currentColor;
-}
-
-.beta-note {
-  margin: 12px 0 0;
-}
-
-.beta-note + .field {
-  margin-top: 16px;
-}

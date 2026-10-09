@@ -7,7 +7,7 @@ without internet, including when added to the iPad Home Screen.
 
 - **PDF → Goodnotes or Anki flashcards**: pick a PDF, mark which pages (or page halves) are questions and answers,
   and download a `.goodnotes` flashcard deck you can open in Goodnotes and study with Smart Learn, or an `.apkg`
-  package for Anki, AnkiMobile and AnkiDroid. Anki support is in beta.
+  package for Anki, AnkiMobile and AnkiDroid.
 - **Goodnotes flashcards → PDF**: open a deck exported from Goodnotes and get a PDF with all cards (handwriting,
   text boxes and images), either one page per side or question and answer on one page.
 

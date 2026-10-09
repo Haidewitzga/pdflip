@@ -11,9 +11,9 @@ const DECK_MIME = 'application/octet-stream'
 
 type Format = 'goodnotes' | 'anki'
 
-const FORMATS: { id: Format; label: string; hint: string; app: string; ext: string; beta?: boolean }[] = [
+const FORMATS: { id: Format; label: string; hint: string; app: string; ext: string }[] = [
   { id: 'goodnotes', label: 'Goodnotes', hint: 'Study with Smart Learn in Goodnotes.', app: 'Goodnotes', ext: 'goodnotes' },
-  { id: 'anki', label: 'Anki', hint: 'For Anki, AnkiMobile and AnkiDroid.', app: 'Anki', ext: 'apkg', beta: true },
+  { id: 'anki', label: 'Anki', hint: 'For Anki, AnkiMobile and AnkiDroid.', app: 'Anki', ext: 'apkg' },
 ]
 
 const FORMAT_KEY = 'pdflip.format'
@@ -267,19 +267,11 @@ export default function PdfToGoodnotes() {
           <div className="modes" role="radiogroup" aria-label="Deck format">
             {FORMATS.map((f) => (
               <button key={f.id} role="radio" aria-checked={format === f.id} className="mode" onClick={() => chooseFormat(f.id)}>
-                <strong>
-                  {f.label} {f.beta && <span className="beta">Beta</span>}
-                </strong>
+                <strong>{f.label}</strong>
                 <span>{f.hint}</span>
               </button>
             ))}
           </div>
-          {fmt.beta && (
-            <p className="muted beta-note">
-              <span className="beta">Beta</span> Anki decks are checked with Anki's own import code but have not been tested
-              in every Anki app. Keep the PDF in case a deck does not import correctly.
-            </p>
-          )}
           <label className="field">
             Deck name
             <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} />
