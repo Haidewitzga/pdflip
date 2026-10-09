@@ -63,9 +63,13 @@ When the stroke blob has no path elements (`n = 0`) the stroke is a shape in fie
 `{1: {1: {x, y}, 1: {x, y}, ...}, 5: {2: type}, 15: width}` (type 1 = straight line).
 Erased strokes look similar but have `3: 1` in their header.
 
-### Filled outlines
+### Centre lines plus filled outlines
 
-Some ink uses the signature `vuA(v)A(u)A(u)A(v)A(v)A(u)A(u)A(u)A(u)A(v)`, laid out with no padding:
-`u16`, `u32`, then ten arrays (`u32 count` + items). Array 5 is the path commands (2 = new subpath,
-4 = cubic curve), array 6 one start point per subpath, array 8 the curve points (3 per curve).
-The outline is filled with the stroke colour.
+Some ink (e.g. arrows, ⊗, dots) uses the signature `vuA(v)A(u)A(u)A(v)A(v)A(u)A(u)A(u)A(u)A(v)`,
+laid out with no padding: `u16`, `f32` pen width (sign ignored), then ten arrays (`u32 count` + items).
+
+- Layer 1, arrays 1–3: commands in array 1. `0` = move (x, y from array 2), `1` = quadratic curve
+  (cx, cy, x, y from array 3); these are stroked with the pen width. `2` (x, y, width from array 2)
+  and `3` (6 values from array 3) describe dots, which layer 2 draws.
+- Layer 2, arrays 4–8: the dots' filled outline. Commands in array 5 (2 = new subpath, 4 = cubic
+  curve), one start point per subpath in array 6 and the curve points (3 per curve) in array 8.

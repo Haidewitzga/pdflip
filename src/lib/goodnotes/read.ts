@@ -138,7 +138,10 @@ async function readCanvas(data: Uint8Array, read: (n: string) => Promise<Uint8Ar
     if (kind === 7) {
       const s = readStroke(e)
       if (s && 'segments' in s) strokes.push(s)
-      else if (s) fills.push(s)
+      else if (s) {
+        strokes.push(...s.lines)
+        if (s.fill) fills.push(s.fill)
+      }
     } else if (kind === 1 && e.has(4)) {
       const fr = frame(e.msg(2))
       const att = e.str(4)
@@ -170,7 +173,7 @@ function strokeStyle(e: View) {
   return { dx: off?.num(1) ?? 0, dy: off?.num(2) ?? 0, color }
 }
 
-function readStroke(e: View): Stroke | FilledInk | null {
+function readStroke(e: View): Stroke | OutlineInk | null {
   const blob = e.bytes(2)
   if (!blob) return null
   let raw: Uint8Array
@@ -246,13 +249,23 @@ function readShape(e: View): Stroke | null {
   return { color, width: width > 0 ? width : 1.56, start: points[0], segments }
 }
 
+interface OutlineInk {
+  /** Centre lines drawn with the pen (commands 0/1 of the first layer). */
+  lines: Stroke[]
+  /** Filled parts such as dots and arrowheads. */
+  fill: FilledInk | null
+}
+
 /**
- * Ink stored as filled outlines (some pens and the shape tool). The payload follows its type
- * signature with no padding: v, u, then ten arrays (u32 count + items). Array 5 holds the path
- * commands (2 = start a subpath, 4 = cubic curve with 3 points), array 6 one start point per
- * subpath and array 8 the curve points (1-based).
+ * Ink stored with a second encoding (used e.g. for arrows and dots). The payload follows its type
+ * signature with no padding: v, u (pen width, may be negative), then ten arrays (u32 count + items).
+ *
+ * Layer 1, arrays 1–3: commands (0 = move, x y from array 2; 1 = quadratic curve, cx cy x y from
+ * array 3; 2 = dot start, x y width from array 2; 3 = dot curve, 6 values from array 3).
+ * Layer 2, arrays 4–8: the filled outline of the dots: commands in array 5 (2 = start a subpath,
+ * 4 = cubic curve), one start point per subpath in array 6 and curve points in array 8.
  */
-function readOutline(e: View, h: Uint8Array): FilledInk | null {
+function readOutline(e: View, h: Uint8Array): OutlineInk | null {
   const dv = new DataView(h.buffer, h.byteOffset, h.byteLength)
   const arrays: { u16?: number[]; f32?: number[] }[] = []
   let i = 6
@@ -273,10 +286,42 @@ function readOutline(e: View, h: Uint8Array): FilledInk | null {
     return null
   }
   if (i !== h.length) return null
+  const { dx, dy, color } = strokeStyle(e)
+  const lineWidth = Math.abs(dv.getFloat32(2, true))
+
+  const lines: Stroke[] = []
+  {
+    const cmds = arrays[0].u16!
+    const a = arrays[1].f32!
+    const b = arrays[2].f32!
+    let pa = 0
+    let pb = 0
+    let cur: Stroke | null = null
+    for (const c of cmds) {
+      if (c === 0) {
+        if (pa + 2 > a.length) return null
+        cur = { color, width: lineWidth > 0 ? lineWidth : 1.56, start: [a[pa] + dx, a[pa + 1] + dy], segments: [] }
+        lines.push(cur)
+        pa += 2
+      } else if (c === 1) {
+        if (!cur || pb + 4 > b.length) return null
+        cur.segments.push(b[pb] + dx, b[pb + 1] + dy, b[pb + 2] + dx, b[pb + 3] + dy)
+        pb += 4
+      } else if (c === 2) {
+        pa += 3
+        cur = null
+      } else if (c === 3) {
+        pb += 6
+      } else {
+        return null
+      }
+    }
+    if (pa !== a.length || pb !== b.length) return null
+  }
+
   const commands = arrays[4].u16!
   const starts = arrays[5].f32!
   const points = arrays[7].f32!
-  const { dx, dy, color } = strokeStyle(e)
   const subpaths: FilledInk['subpaths'] = []
   let s = 0
   let p = 0
@@ -294,8 +339,9 @@ function readOutline(e: View, h: Uint8Array): FilledInk | null {
       return null // a command we have not seen yet
     }
   }
-  if (subpaths.length === 0 || !points.every(Number.isFinite)) return null
-  return { color, subpaths }
+  if (!points.every(Number.isFinite)) return null
+  const finite = (st: Stroke) => st.start.every(Number.isFinite) && st.segments.every(Number.isFinite)
+  return { lines: lines.filter(finite), fill: subpaths.length ? { color, subpaths } : null }
 }
 
 /** Extracts plain text from the simple RTF Goodnotes writes for text boxes. */

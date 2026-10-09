@@ -182,18 +182,19 @@ describe('ink formats', () => {
     expect(side.kind === 'canvas' && side.strokes[0]).toMatchObject({ start: [15, 20], segments: [65, 20, 115, 20], width: 2 })
   })
 
-  it('reads ink stored as filled outlines', async () => {
+  it('reads ink stored as centre lines plus filled outlines', async () => {
     const arr16 = (xs: number[]) => [...u32(xs.length), ...xs.flatMap(u16)]
     const arr32 = (xs: number[]) => [...u32(xs.length), ...xs.flatMap(f32)]
     const payload = [
       ...u16(2), ...u32(0),
-      ...arr16([2, 3]), ...arr32([]), ...arr32([]), ...arr16([2]),
+      ...arr16([0, 1, 2, 3]), ...arr32([10, 10, 0, 0, 1]), ...arr32([15, 10, 20, 10, 0, 0, 0, 0, 1, 1]), ...arr16([2]),
       ...arr16([2, 4]), ...arr32([1, 2]), ...arr32([]), ...arr32([3, 4, 5, 6, 7, 8]), ...arr32([]), ...arr16([]),
     ]
     const blob = bv41(tpl('vuA(v)A(u)A(u)A(v)A(v)A(u)A(u)A(u)A(u)A(v)', payload))
     const stroke = new Msg().bytes(1, 'S2').bytes(2, blob).bytes(4, new Msg().f32(1, 1).f32(4, 1))
     const side = (await readDeck(await deckWithStroke(stroke))).cards[0].front
     expect(side.kind === 'canvas' && side.fills[0]).toEqual({ color: [1, 0, 0, 1], subpaths: [{ start: [1, 2], curves: [3, 4, 5, 6, 7, 8] }] })
+    expect(side.kind === 'canvas' && side.strokes[0]).toMatchObject({ start: [10, 10], segments: [15, 10, 20, 10] })
     const pdf = await deckToPdf({ title: 't', cards: [{ front: side, back: side }] }, { layout: 'pages', labels: false })
     expect(pdf.length).toBeGreaterThan(500)
   })
