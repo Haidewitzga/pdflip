@@ -8,6 +8,16 @@ pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 
 export type PdfDoc = pdfjs.PDFDocumentProxy
 
+/** Page sizes in points (rotation applied). */
+export async function pageSizes(doc: PdfDoc): Promise<{ w: number; h: number }[]> {
+  const out: { w: number; h: number }[] = []
+  for (let p = 1; p <= doc.numPages; p++) {
+    const vp = (await doc.getPage(p)).getViewport({ scale: 1 })
+    out.push({ w: vp.width, h: vp.height })
+  }
+  return out
+}
+
 export async function openPdf(data: ArrayBuffer): Promise<PdfDoc> {
   try {
     return await pdfjs.getDocument({ data: new Uint8Array(data) }).promise
@@ -42,9 +52,16 @@ export interface Crop {
   h: number
 }
 
+export interface SideSpec {
+  page: number
+  crop?: Crop
+  /** Exact place on the card (points); by default the image is scaled to fit with a margin. */
+  target?: { x: number; y: number; w: number; h: number }
+}
+
 export interface CardSpec {
-  front: { page: number; crop?: Crop }
-  back: { page: number; crop?: Crop }
+  front: SideSpec
+  back: SideSpec
 }
 
 const MARGIN = 36
@@ -79,14 +96,14 @@ function fit(w: number, h: number): Omit<SideImage, 'data'> {
   return { x: (CARD_W - iw) / 2, y: (CARD_H - ih) / 2, w: iw, h: ih }
 }
 
-async function sideImage(doc: PdfDoc, spec: { page: number; crop?: Crop }, cache: Map<number, HTMLCanvasElement>) {
+async function sideImage(doc: PdfDoc, spec: SideSpec, cache: Map<number, HTMLCanvasElement>) {
   let full = cache.get(spec.page)
   if (!full) {
     full = await renderPage(doc, spec.page, RENDER_PX)
     cache.set(spec.page, full)
   }
   const c = cropCanvas(full, spec.crop)
-  return { canvas: c, image: { data: await toBytes(c, 'image/png'), ...fit(c.width, c.height) } }
+  return { canvas: c, image: { data: await toBytes(c, 'image/png'), ...(spec.target ?? fit(c.width, c.height)) } }
 }
 
 async function blankTemplatePdf(): Promise<Uint8Array> {

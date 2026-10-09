@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { openPdf, pdfToDeck, renderPage, type CardSpec, type PdfDoc } from '../lib/pdfToCards'
-import { autoMarks, MODES, pairMarks, splitPages, type Mark, type Mode } from '../lib/pairing'
+import { openPdf, pageSizes, pdfToDeck, renderPage, type CardSpec, type PdfDoc } from '../lib/pdfToCards'
+import { detectPdflipLayout, type PdflipLayout } from '../lib/pdflipLayout'
+import { autoMarks, MODES, pairMarks, restorePdflipCards, splitPages, type Mark, type Mode } from '../lib/pairing'
 import { canShareFiles, download, safeFilename, share } from '../lib/download'
 import FilePicker from './FilePicker'
 import Progress from './Progress'
@@ -19,6 +20,9 @@ export default function PdfToGoodnotes() {
   const [progress, setProgress] = useState<[number, number] | null>(null)
   const [result, setResult] = useState<Uint8Array | null>(null)
   const [thumbsDone, setThumbsDone] = useState(0)
+  const [pdflip, setPdflip] = useState<PdflipLayout | null>(null)
+  const [aspects, setAspects] = useState<number[]>([])
+  const [restore, setRestore] = useState(true)
   const loadId = useRef(0)
 
   const pageCount = doc?.numPages ?? 0
@@ -30,6 +34,13 @@ export default function PdfToGoodnotes() {
     try {
       const d = await openPdf(await file.arrayBuffer())
       if (id !== loadId.current) return
+      const sizes = await pageSizes(d)
+      const made = detectPdflipLayout(sizes)
+      if (id !== loadId.current) return
+      setAspects(sizes.map((s) => s.w / s.h))
+      setPdflip(made)
+      setRestore(true)
+      setMode(made?.layout === 'stacked' ? 'top-bottom' : 'alternate')
       setDoc(d)
       setFileName(file.name)
       setTitle(file.name.replace(/\.pdf$/i, ''))
@@ -78,7 +89,7 @@ export default function PdfToGoodnotes() {
     }
   }
 
-  const { cards, unpaired, labels } = useMemo(() => {
+  const { cards, unpaired, labels, restoring } = useMemo(() => {
     const labels = new Map<number, string>()
     let cards: CardSpec[]
     let unpaired: number[] = []
@@ -95,8 +106,11 @@ export default function PdfToGoodnotes() {
       })
       unpaired.forEach((p) => labels.set(p, 'Unpaired'))
     }
-    return { cards, unpaired, labels }
-  }, [mode, marks, skipped, pageCount])
+    // PDFs made by PDFlip: put each card back at its original size.
+    const restoring = !!pdflip && restore && (pdflip.layout === 'stacked' ? mode === 'top-bottom' : mode === 'alternate' || mode === 'manual')
+    if (restoring) cards = restorePdflipCards(cards, pdflip!)
+    return { cards, unpaired, labels, restoring }
+  }, [mode, marks, skipped, pageCount, pdflip, restore])
 
   async function create() {
     if (!doc || cards.length === 0) return
@@ -136,6 +150,22 @@ export default function PdfToGoodnotes() {
       {doc && (
         <>
           <fieldset className="settings" disabled={!!progress}>
+          {pdflip && (
+            <div className="notice">
+              <p>
+                <strong>This PDF was made with PDFlip.</strong>{' '}
+                {restoring
+                  ? 'Each card will be restored at its original size, without the card numbers and frame.'
+                  : pdflip.layout === 'stacked'
+                    ? 'Choose “Top / bottom” to restore each card at its original size.'
+                    : 'Choose “Page pairs” or “Mark pages” to restore each card at its original size.'}
+              </p>
+              <label className="check">
+                <input type="checkbox" checked={restore} onChange={(e) => { setRestore(e.target.checked); setResult(null) }} /> Restore
+                PDFlip cards
+              </label>
+            </div>
+          )}
           <h2>1. How are your questions and answers laid out?</h2>
           <div className="modes" role="radiogroup" aria-label="Layout">
             {MODES.map((m) => (
@@ -164,7 +194,7 @@ export default function PdfToGoodnotes() {
                 <li key={page}>
                   <button className={`page ${state}`} onClick={() => tapPage(page)} aria-label={`Page ${page}: ${mark === 'skip' ? 'skipped' : label ?? ''}`}>
                     <span className={`thumb ${isSplit ? mode : ''}`}>
-                      {src ? <img src={src} alt="" /> : <span className="placeholder" />}
+                      {src ? <img src={src} alt="" /> : <span className="placeholder" style={{ aspectRatio: aspects[i] || 0.75 }} />}
                       {isSplit && mark !== 'skip' && (
                         <>
                           <span className="half q">Q</span>

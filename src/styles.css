@@ -484,3 +484,18 @@ fieldset.settings {
 fieldset.settings:disabled {
   opacity: 0.6;
 }
+
+.notice {
+  margin-top: 16px;
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+}
+
+.notice p {
+  margin: 0;
+}
+
+.notice .check {
+  margin-top: 8px;
+}
