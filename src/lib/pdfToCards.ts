@@ -29,9 +29,13 @@ export async function openPdf(data: ArrayBuffer): Promise<PdfDoc> {
 
 /** Renders a page into a canvas whose longest side is at most maxPx. */
 export async function renderPage(doc: PdfDoc, pageNo: number, maxPx: number): Promise<HTMLCanvasElement> {
+  const base = (await doc.getPage(pageNo)).getViewport({ scale: 1 })
+  return renderPageAtScale(doc, pageNo, maxPx / Math.max(base.width, base.height))
+}
+
+/** Renders a page at a given scale (pixels per PDF point). */
+async function renderPageAtScale(doc: PdfDoc, pageNo: number, scale: number): Promise<HTMLCanvasElement> {
   const page = await doc.getPage(pageNo)
-  const base = page.getViewport({ scale: 1 })
-  const scale = maxPx / Math.max(base.width, base.height)
   const vp = page.getViewport({ scale })
   const canvas = document.createElement('canvas')
   canvas.width = Math.round(vp.width)
@@ -65,7 +69,23 @@ export interface CardSpec {
 }
 
 const MARGIN = 36
-const RENDER_PX = 1800
+/** Image pixels per point of card: 2 matches the iPad's Retina display, so card text looks as sharp as the original. */
+const PX_PER_CARD_POINT = 2
+/** iPad Safari refuses canvases above ~16.7 megapixels; stay well below. */
+const MAX_CANVAS_AREA = 12_000_000
+const JPEG_QUALITY = 0.92
+
+/**
+ * Pixels per PDF point to render a page at, so the cropped region ends up with
+ * PX_PER_CARD_POINT pixels per point of its width on the card.
+ */
+export function renderScale(page: { w: number; h: number }, crop: Crop | undefined, placedWidth: number): number {
+  const cropW = (crop?.w ?? 1) * page.w
+  let scale = (placedWidth * PX_PER_CARD_POINT) / cropW
+  const area = page.w * scale * page.h * scale
+  if (area > MAX_CANVAS_AREA) scale *= Math.sqrt(MAX_CANVAS_AREA / area)
+  return scale
+}
 
 function toBytes(canvas: HTMLCanvasElement, type: 'image/png' | 'image/jpeg', quality?: number): Promise<Uint8Array> {
   return new Promise((resolve, reject) =>
@@ -89,21 +109,28 @@ function cropCanvas(src: HTMLCanvasElement, crop?: Crop): HTMLCanvasElement {
 }
 
 /** Scales an image of w×h to fit the card (minus margins), centred. */
-function fit(w: number, h: number): Omit<SideImage, 'data'> {
+export function fit(w: number, h: number): Omit<SideImage, 'data'> {
   const s = Math.min((CARD_W - 2 * MARGIN) / w, (CARD_H - 2 * MARGIN) / h)
   const iw = w * s
   const ih = h * s
   return { x: (CARD_W - iw) / 2, y: (CARD_H - ih) / 2, w: iw, h: ih }
 }
 
-async function sideImage(doc: PdfDoc, spec: SideSpec, cache: Map<number, HTMLCanvasElement>) {
-  let full = cache.get(spec.page)
+async function sideImage(doc: PdfDoc, spec: SideSpec, cache: Map<string, HTMLCanvasElement>) {
+  const base = (await doc.getPage(spec.page)).getViewport({ scale: 1 })
+  const page = { w: base.width, h: base.height }
+  const crop = spec.crop
+  // where the region goes on the card decides how finely the page is rendered
+  const placed = spec.target ?? fit((crop?.w ?? 1) * page.w, (crop?.h ?? 1) * page.h)
+  const scale = renderScale(page, crop, placed.w)
+  const key = `${spec.page}@${scale.toFixed(4)}`
+  let full = cache.get(key)
   if (!full) {
-    full = await renderPage(doc, spec.page, RENDER_PX)
-    cache.set(spec.page, full)
+    full = await renderPageAtScale(doc, spec.page, scale)
+    cache.set(key, full)
   }
-  const c = cropCanvas(full, spec.crop)
-  return { canvas: c, image: { data: await toBytes(c, 'image/png'), ...(spec.target ?? fit(c.width, c.height)) } }
+  const c = cropCanvas(full, crop)
+  return { canvas: c, image: { data: await toBytes(c, 'image/jpeg', JPEG_QUALITY), ...placed } }
 }
 
 async function blankTemplatePdf(): Promise<Uint8Array> {
@@ -134,7 +161,7 @@ export async function pdfToDeck(
   specs: CardSpec[],
   onProgress?: (done: number, total: number) => void,
 ): Promise<Uint8Array> {
-  const cache = new Map<number, HTMLCanvasElement>()
+  const cache = new Map<string, HTMLCanvasElement>()
   const cards: NewCard[] = []
   let thumb: Uint8Array | null = null
   for (const [i, spec] of specs.entries()) {
@@ -143,7 +170,7 @@ export async function pdfToDeck(
     if (!thumb) thumb = await thumbnail(front.canvas)
     cards.push({ front: front.image, back: back.image })
     // Keep memory bounded on long documents: only the most recent pages stay rendered.
-    while (cache.size > 3) cache.delete(cache.keys().next().value!)
+    while (cache.size > 2) cache.delete(cache.keys().next().value!)
     onProgress?.(i + 1, specs.length)
   }
   return writeDeck({
