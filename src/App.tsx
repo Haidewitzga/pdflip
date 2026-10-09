@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import PdfToGoodnotes from './components/PdfToGoodnotes'
 import GoodnotesToPdf from './components/GoodnotesToPdf'
-import { Imprint, Privacy } from './components/Legal'
+import { Privacy } from './components/Legal'
+import { testedWith } from './site.config'
 
-type Route = 'to-goodnotes' | 'to-pdf' | 'privacy' | 'imprint'
-const ROUTES: Route[] = ['to-goodnotes', 'to-pdf', 'privacy', 'imprint']
+type Route = 'to-goodnotes' | 'to-pdf' | 'privacy'
+const ROUTES: Route[] = ['to-goodnotes', 'to-pdf', 'privacy']
 
 function currentRoute(): Route {
   const h = location.hash.slice(1) as Route
@@ -52,7 +53,6 @@ export default function App() {
           <GoodnotesToPdf />
         </div>
         {route === 'privacy' && <Privacy />}
-        {route === 'imprint' && <Imprint />}
       </main>
 
       <footer className="site-footer">
@@ -62,10 +62,11 @@ export default function App() {
         </p>
         <p>
           PDFlip is an independent project and is not affiliated with, endorsed by, or connected to Goodnotes. Goodnotes
-          is a trademark of its respective owner. Experimental – keep a backup of your original decks.
+          is a trademark of its respective owner. Experimental – tested with {testedWith}; keep a backup of your original
+          decks.
         </p>
         <p className="footer-links">
-          <a href="#privacy">Privacy</a> · <a href="#imprint">Imprint</a> ·{' '}
+          <a href="#privacy">Privacy</a> ·{' '}
           <a href="https://github.com/Haidewitzga/pdflip" target="_blank" rel="noreferrer">
             Source code
           </a>
