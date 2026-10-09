@@ -48,25 +48,18 @@ const codePoint = (ch: string) => 'U+' + ch.codePointAt(0)!.toString(16).toUpper
 // ---------------------------------------------------------------------------------------------
 // Problem builders
 
-/** Which writing system a PDF character map (CMap) is for, from its standard name. */
-export function cmapScript(name: string): string {
-  if (/GB|GBK|GBpc|GBT/.test(name)) return 'Simplified Chinese'
-  if (/CNS|B5|ETen|HKscs|ETHK|HKdla|HKdlb|HKgccs|HKm/.test(name)) return 'Traditional Chinese'
-  if (/KSC|UHC|Johab|UniKS|KSCms|KSCpc/.test(name)) return 'Korean'
-  if (/JIS|RKSJ|EUC|90ms|90pv|83pv|Hankaku|Hiragana|Katakana|Roman|NWP|Add|Ext|^[HV]$/.test(name)) return 'Japanese'
-  return 'other'
-}
+// PDFlip does not interpret what it cannot handle (which language, which script): it reports the
+// raw facts (character map names, Unicode code points) and whoever handles the issue works out
+// what they mean.
 
 export function missingCharacterMapProblem(cmaps: string[], pdfjsVersion: string): Problem {
-  const scripts = [...new Set(cmaps.map(cmapScript))].sort()
-  const what = scripts.filter((s) => s !== 'other').join(', ') || 'non-Latin'
   return {
     area: 'pdf-to-goodnotes',
     kind: 'missing-character-map',
     signature: `pdf.missing-cmap:${slug(cmaps.join('+'))}`,
-    title: `PDF text needs character maps PDFlip does not ship (${what})`,
-    message: `This PDF contains ${what} text that PDFlip cannot display yet. That text will be missing from your cards.`,
-    details: { characterMaps: cmaps, scripts, pdfjs: pdfjsVersion },
+    title: `PDF needs character maps PDFlip does not ship: ${cmaps.join(', ')}`.slice(0, 140),
+    message: 'This PDF uses a font PDFlip cannot display yet, so some of its text will be missing from your cards.',
+    details: { characterMaps: cmaps, pdfjs: pdfjsVersion },
   }
 }
 
@@ -100,31 +93,21 @@ export function pdfReaderWarningProblem(warnings: string[], pdfjsVersion: string
   }
 }
 
-const SCRIPTS: [string, RegExp][] = [
-  ['Han (Chinese/Japanese kanji)', /\p{Script=Han}/u],
-  ['Hiragana', /\p{Script=Hiragana}/u],
-  ['Katakana', /\p{Script=Katakana}/u],
-  ['Hangul (Korean)', /\p{Script=Hangul}/u],
-  ['Arabic', /\p{Script=Arabic}/u],
-  ['Hebrew', /\p{Script=Hebrew}/u],
-  ['Devanagari', /\p{Script=Devanagari}/u],
-  ['Thai', /\p{Script=Thai}/u],
-  ['Emoji', /\p{Extended_Pictographic}/u],
-]
-
-const scriptOf = (ch: string) => SCRIPTS.find(([, re]) => re.test(ch))?.[0] ?? 'other'
+/** The 4096-code-point block a character is in, e.g. "U+5xxx": a neutral way to group characters. */
+const block = (ch: string) => `U+${(ch.codePointAt(0)! >> 12).toString(16).toUpperCase()}xxx`
 
 export function unsupportedCharactersProblem(chars: string[]): Problem {
-  const scripts = [...new Set(chars.map(scriptOf))].sort()
-  const what = scripts.join(', ')
+  const sorted = [...chars].sort((a, b) => a.codePointAt(0)! - b.codePointAt(0)!)
+  const blocks = [...new Set(sorted.map(block))]
   return {
     area: 'goodnotes-to-pdf',
     kind: 'unsupported-characters',
-    signature: `gn.unsupported-chars:${slug(scripts.join('+'))}`,
-    title: `Card text has characters no bundled font can show (${what})`,
-    message: `Some characters in your cards (${what}) cannot be shown by PDFlip's fonts yet. They appear as "?" in the PDF.`,
-    // a few code points are enough to reproduce; the full text of the cards is never sent
-    details: { scripts, distinctCharacters: chars.length, examples: chars.slice(0, 3).map(codePoint) },
+    // grouped by the lowest block, so reports of the same writing system usually match
+    signature: `gn.unsupported-chars:${slug(blocks[0])}`,
+    title: `Card text has characters no bundled font can show (${blocks.join(', ')})`.slice(0, 140),
+    message: 'Some characters in your cards cannot be shown by PDFlip\'s fonts yet. They appear as "?" in the PDF.',
+    // a few code points are enough to reproduce; the text of the cards is never sent
+    details: { distinctCharacters: chars.length, blocks, examples: sorted.slice(0, 5).map(codePoint) },
   }
 }
 

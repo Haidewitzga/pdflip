@@ -1,6 +1,5 @@
 import {
   browserSummary,
-  cmapScript,
   isUnexpected,
   missingCharacterMapProblem,
   pdfReaderWarningProblem,
@@ -464,14 +463,11 @@ describe('file checks', () => {
 })
 
 describe('problem reports', () => {
-  it('names the writing system of missing PDF character maps', () => {
-    expect(cmapScript('UniGB-UCS2-H')).toBe('Simplified Chinese')
-    expect(cmapScript('UniCNS-UTF16-H')).toBe('Traditional Chinese')
-    expect(cmapScript('UniJIS-UCS2-H')).toBe('Japanese')
-    expect(cmapScript('UniKS-UCS2-H')).toBe('Korean')
+  it('reports missing PDF character maps by their raw names, without interpreting them', () => {
     const p = missingCharacterMapProblem(['UniGB-UCS2-H'], '4.10.38')
     expect(p).toMatchObject({ kind: 'missing-character-map', signature: 'pdf.missing-cmap:unigb-ucs2-h' })
-    expect(p.message).toContain('Simplified Chinese')
+    expect(p.details).toEqual({ characterMaps: ['UniGB-UCS2-H'], pdfjs: '4.10.38' })
+    expect(p.message).not.toMatch(/chinese/i)
   })
 
   it('reports Chinese card text that no font can show, without the text itself', async () => {
@@ -486,8 +482,8 @@ describe('problem reports', () => {
     // θ is in the bundled font; the Chinese characters are not
     expect(chars.sort()).toEqual(['作', '光', '合', '用'].sort())
     const p = unsupportedCharactersProblem(chars)
-    expect(p).toMatchObject({ kind: 'unsupported-characters', signature: 'gn.unsupported-chars:han-chinese-japanese-kanji' })
-    expect(p.details.examples).toHaveLength(3)
+    expect(p).toMatchObject({ kind: 'unsupported-characters', signature: 'gn.unsupported-chars:u+4xxx' })
+    expect(p.details).toEqual({ distinctCharacters: 4, blocks: ['U+4xxx', 'U+5xxx', 'U+7xxx'], examples: ['U+4F5C', 'U+5149', 'U+5408', 'U+7528'] })
     expect(JSON.stringify(p)).not.toContain('光')
   })
 

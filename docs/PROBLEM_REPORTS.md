@@ -24,14 +24,16 @@ user's browser ──(tap "Send report")──▶ relay (Cloudflare Worker) ─�
 | `unreadable-part` | the Goodnotes reader skips a part it does not understand (pen type, element kind, image format, card side) | `skip()` in `src/lib/goodnotes/read.ts` |
 | `unexpected-error` | any exception that is not one of PDFlip's own "wrong file" messages | the two tool components |
 
-Messages are built from what was detected (script names, part names, counts, error text), so new cases in these
-categories need no new code. Problems that go wrong **silently** need a check where the information is lost; a fix for
+PDFlip does not interpret what it cannot handle: it never decides which language or script a problem is about. The
+message to the user stays generic, and the report carries the raw facts (character map names, code points, warning
+text, structure fingerprints, error messages) for whoever handles the issue. New cases in these categories need no
+new code. Problems that go wrong **silently** need a check where the information is lost; a fix for
 such a problem should add one (see the fixer's rules below).
 
 ## What a report contains
 
 Only technical details, shown to the user before sending: kind, area, a stable signature, character map names,
-Unicode scripts and up to three code points, pdf.js warnings (numbers removed), structural fingerprints of unreadable
+Unicode code points (up to five) and their 4096-character blocks, pdf.js warnings (numbers removed), structural fingerprints of unreadable
 parts (field numbers, type signature, first bytes), error messages and stack lines, the PDFlip commit and a browser
 summary like "Safari 18 on iPad". Never the file, its images or card text. Issues are public.
 
