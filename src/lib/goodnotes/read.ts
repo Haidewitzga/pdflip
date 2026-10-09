@@ -368,9 +368,12 @@ function readOutline(e: View, h: Uint8Array): OutlineInk | null {
   const commands = arrays[4].u16!
   const starts = arrays[5].f32!
   const points = arrays[7].f32!
+  const arcs = arrays[8].f32!
+  const arcFlags = arrays[9].u16!
   const subpaths: FilledInk['subpaths'] = []
   let s = 0
   let p = 0
+  let a = 0
   for (const c of commands) {
     if (c === 2) {
       if (s + 2 > starts.length) return null
@@ -381,13 +384,41 @@ function readOutline(e: View, h: Uint8Array): OutlineInk | null {
       if (!cur || p + 6 > points.length) return null
       for (let k = 0; k < 6; k += 2) cur.curves.push(points[p + k] + dx, points[p + k + 1] + dy)
       p += 6
+    } else if (c === 5) {
+      // round cap: arc around (cx, cy) with radius r from angle a0 to a1, continuing from the current point
+      const cur = subpaths[subpaths.length - 1]
+      if (!cur || 5 * a + 5 > arcs.length) return null
+      const [cx, cy, r, a0, a1] = arcs.slice(5 * a, 5 * a + 5)
+      cur.curves.push(...arcCurves(cx + dx, cy + dy, r, a0, a1, arcFlags[a] !== 0))
+      a++
     } else {
       return null // a command we have not seen yet
     }
   }
-  if (!points.every(Number.isFinite)) return null
+  if (!subpaths.every((sp) => sp.start.every(Number.isFinite) && sp.curves.every(Number.isFinite))) return null
   const finite = (st: Stroke) => st.start.every(Number.isFinite) && st.segments.every(Number.isFinite)
   return { lines: lines.filter(finite), fill: subpaths.length ? { color, subpaths } : null }
+}
+
+/**
+ * A circular arc as cubic Bézier curves [c1x, c1y, c2x, c2y, x, y, ...]. With `decreasing` the angle runs
+ * down from a0 to a1, otherwise up (angles in radians, y pointing down).
+ */
+function arcCurves(cx: number, cy: number, r: number, a0: number, a1: number, decreasing: boolean): number[] {
+  let sweep = a1 - a0
+  if (decreasing) while (sweep > 0) sweep -= 2 * Math.PI
+  else while (sweep < 0) sweep += 2 * Math.PI
+  const n = Math.max(1, Math.ceil(Math.abs(sweep) / (Math.PI / 2) - 1e-6))
+  const step = sweep / n
+  const k = (4 / 3) * Math.tan(step / 4) * r
+  const out: number[] = []
+  for (let i = 0; i < n; i++) {
+    const t0 = a0 + i * step
+    const t1 = t0 + step
+    const [c0, s0, c1, s1] = [Math.cos(t0), Math.sin(t0), Math.cos(t1), Math.sin(t1)]
+    out.push(cx + r * c0 - k * s0, cy + r * s0 + k * c0, cx + r * c1 + k * s1, cy + r * s1 - k * c1, cx + r * c1, cy + r * s1)
+  }
+  return out
 }
 
 /** Plain text of the RTF Goodnotes writes for text boxes. */
