@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { openPdf, pageSizes, pdfToDeck, renderPage, type CardSpec, type PdfDoc } from '../lib/pdfToCards'
+import { openPdf, pageSizes, pdfToAnki, pdfToDeck, renderPage, type CardSpec, type PdfDoc } from '../lib/pdfToCards'
 import { readPdfFile } from '../lib/fileCheck'
 import { detectPdflipLayout, type PdflipLayout } from '../lib/pdflipLayout'
 import { autoMarks, MODES, pairMarks, restorePdflipCards, splitPages, type Mark, type Mode } from '../lib/pairing'
@@ -7,7 +7,24 @@ import { canShareFiles, download, safeFilename, share } from '../lib/download'
 import FilePicker from './FilePicker'
 import Progress from './Progress'
 
-const GOODNOTES_MIME = 'application/octet-stream'
+const DECK_MIME = 'application/octet-stream'
+
+type Format = 'goodnotes' | 'anki'
+
+const FORMATS: { id: Format; label: string; hint: string; app: string; ext: string }[] = [
+  { id: 'goodnotes', label: 'Goodnotes', hint: 'Study with Smart Learn in Goodnotes.', app: 'Goodnotes', ext: 'goodnotes' },
+  { id: 'anki', label: 'Anki', hint: 'For Anki, AnkiMobile and AnkiDroid.', app: 'Anki', ext: 'apkg' },
+]
+
+const FORMAT_KEY = 'pdflip.format'
+
+function savedFormat(): Format {
+  try {
+    return localStorage.getItem(FORMAT_KEY) === 'anki' ? 'anki' : 'goodnotes'
+  } catch {
+    return 'goodnotes'
+  }
+}
 
 export default function PdfToGoodnotes() {
   const [doc, setDoc] = useState<PdfDoc | null>(null)
@@ -24,6 +41,7 @@ export default function PdfToGoodnotes() {
   const [pdflip, setPdflip] = useState<PdflipLayout | null>(null)
   const [aspects, setAspects] = useState<number[]>([])
   const [restore, setRestore] = useState(true)
+  const [format, setFormat] = useState<Format>(savedFormat)
   const loadId = useRef(0)
 
   const pageCount = doc?.numPages ?? 0
@@ -134,7 +152,8 @@ export default function PdfToGoodnotes() {
     setResult(null)
     setProgress([0, cards.length])
     try {
-      const bytes = await pdfToDeck(doc, title.trim() || 'Flashcards', cards, (d, t) => setProgress([d, t]))
+      const make = format === 'anki' ? pdfToAnki : pdfToDeck
+      const bytes = await make(doc, title.trim() || 'Flashcards', cards, (d, t) => setProgress([d, t]))
       setResult(bytes)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -143,16 +162,27 @@ export default function PdfToGoodnotes() {
     }
   }
 
-  const outName = `${safeFilename(title || 'Flashcards')}.goodnotes`
+  function chooseFormat(f: Format) {
+    setFormat(f)
+    setResult(null)
+    try {
+      localStorage.setItem(FORMAT_KEY, f)
+    } catch {
+      // remembering the choice is only a convenience
+    }
+  }
+
+  const fmt = FORMATS.find((f) => f.id === format)!
+  const outName = `${safeFilename(title || 'Flashcards')}.${fmt.ext}`
   const isSplit = mode === 'top-bottom'
   useEffect(() => () => void doc?.destroy(), [doc])
 
   return (
     <section className="tool">
-      <h1>Turn a PDF into Goodnotes flashcards</h1>
+      <h1>Turn a PDF into flashcards</h1>
       <p className="lead">
-        Pick a PDF, choose which pages are questions and answers, and download a flashcard deck you can open in Goodnotes
-        and study with Smart Learn.
+        Pick a PDF, choose which pages are questions and answers, and download a flashcard deck for Goodnotes (study with
+        Smart Learn) or Anki.
       </p>
 
       <fieldset className="settings" disabled={!!progress}>
@@ -234,6 +264,14 @@ export default function PdfToGoodnotes() {
           </ol>
 
           <h2>3. Create the deck</h2>
+          <div className="modes" role="radiogroup" aria-label="Deck format">
+            {FORMATS.map((f) => (
+              <button key={f.id} role="radio" aria-checked={format === f.id} className="mode" onClick={() => chooseFormat(f.id)}>
+                <strong>{f.label}</strong>
+                <span>{f.hint}</span>
+              </button>
+            ))}
+          </div>
           <label className="field">
             Deck name
             <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} />
@@ -241,7 +279,7 @@ export default function PdfToGoodnotes() {
           {!progress && (
             <div className="actions">
               <button className="primary" onClick={create} disabled={cards.length === 0}>
-                Create Goodnotes deck ({cards.length} cards)
+                Create {fmt.app} deck ({cards.length} cards)
               </button>
             </div>
           )}
@@ -262,16 +300,24 @@ export default function PdfToGoodnotes() {
               </p>
               <div className="actions">
                 {canShareFiles() && (
-                  <button className="primary" onClick={() => share(result, outName, GOODNOTES_MIME)}>
-                    Open in Goodnotes…
+                  <button className="primary" onClick={() => share(result, outName, DECK_MIME)}>
+                    Open in {fmt.app}…
                   </button>
                 )}
-                <button onClick={() => download(result, outName, GOODNOTES_MIME)}>Download {outName}</button>
+                <button onClick={() => download(result, outName, DECK_MIME)}>Download {outName}</button>
               </div>
-              <p className="muted">
-                On iPad: tap <em>Open in Goodnotes…</em> and choose Goodnotes, or open the downloaded file from the Files app
-                and share it to Goodnotes. If Goodnotes asks, import it as a new document.
-              </p>
+              {format === 'goodnotes' ? (
+                <p className="muted">
+                  On iPad: tap <em>Open in Goodnotes…</em> and choose Goodnotes, or open the downloaded file from the Files
+                  app and share it to Goodnotes. If Goodnotes asks, import it as a new document.
+                </p>
+              ) : (
+                <p className="muted">
+                  On iPad or iPhone: tap <em>Open in Anki…</em> and choose AnkiMobile, or open the downloaded file from the
+                  Files app. On a computer: double-click the file or use File → Import in Anki. The cards are added as a new
+                  deck.
+                </p>
+              )}
             </div>
           )}
         </>
