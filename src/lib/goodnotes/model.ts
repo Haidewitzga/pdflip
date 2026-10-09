@@ -33,6 +33,8 @@ export interface CanvasImage extends Layered {
   data: Uint8Array
 }
 
+import type { TextRun } from '../rtf'
+
 export interface TextBox extends Layered {
   x: number
   y: number
@@ -40,6 +42,8 @@ export interface TextBox extends Layered {
   h: number
   text: string
   fontSize: number
+  /** Styled pieces of the text (font family, bold, italic, size in canvas units, colour). */
+  runs?: TextRun[]
 }
 
 export type Side =
