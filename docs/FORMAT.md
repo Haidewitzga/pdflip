@@ -35,6 +35,7 @@ Mutable values are `{1: value, 2: clock}` with `clock = {1: counter, 2: random u
 | 102 | Notes file registered | `1: notes id` (= canvas id + 1 as a 128-bit integer) |
 | 151 | Card created | `1: card id`, `4: order`, `5: front`, `6: back` |
 | 152 | Card updated | `1: card id`, `3: order`, `4: front`, `5: back` |
+| 153 | Card deleted / restored | `1: card id`, `3: {1: 1 = deleted, 0 = restored, 2: clock}` |
 | 10 / 34 / 150 | Viewing state (last page / settings / last card) | not needed |
 
 A card side is `{1: content, 2: clock}` where content is typed text `{1: {1: "text/plain", 2: text}}`,
