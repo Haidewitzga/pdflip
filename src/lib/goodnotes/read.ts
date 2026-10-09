@@ -43,6 +43,7 @@ export async function readDeck(file: ArrayBuffer | Uint8Array): Promise<Deck> {
   if (!events) throw new Error('This .goodnotes file has no event log (index.events.pb).')
 
   let title = 'Flashcards'
+  let titleClock: Clock = [-1n, 0n]
   const cards = new Map<string, CardState>()
 
   for (const m of readStream(events)) {
@@ -52,8 +53,15 @@ export async function readDeck(file: ArrayBuffer | Uint8Array): Promise<Deck> {
     if (!body || body.t !== 2) continue
     const e = View.try(body.v)
     if (!e) continue
-    if (body.f === 30) {
-      title = e.msg(2)?.str(1) ?? title
+    if (body.f === 30 || body.f === 31) {
+      // 30 creates the document, 31 renames it; the newest clock wins
+      const t = e.msg(2)
+      const name = t?.str(1)
+      const clock = clockOf(t?.msg(2) ?? null)
+      if (name && newer(clock, titleClock)) {
+        title = name
+        titleClock = clock
+      }
     } else if (body.f === 153) {
       // card deleted (or restored): {3: {1: 1 = deleted, 2: clock}}
       const id = e.str(1)
@@ -124,6 +132,8 @@ export const UNSUPPORTED_SIDE = '[PDFlip cannot read this card side yet]'
 
 async function readCanvas(data: Uint8Array, read: (n: string) => Promise<Uint8Array | undefined>): Promise<Side> {
   const deleted = new Set<string>()
+  /** Element id → attachment file named in its header (decks re-saved by Goodnotes use field 7). */
+  const headerFiles = new Map<string, string>()
   const elements: [number, View][] = []
   for (const m of data.length ? readStream(data) : []) {
     const p = tryParse(m)
@@ -133,6 +143,8 @@ async function readCanvas(data: Uint8Array, read: (n: string) => Promise<Uint8Ar
       // element header; field 3 = 1 marks an erased element
       const h = new View(p)
       if (h.int(3) === 1n) deleted.add(h.str(1)!)
+      const file = h.str(7)
+      if (file) headerFiles.set(h.str(1)!, file)
       continue
     }
     if (first.t !== 2) continue
@@ -160,8 +172,11 @@ async function readCanvas(data: Uint8Array, read: (n: string) => Promise<Uint8Ar
       }
     } else if (kind === 1 && e.has(4)) {
       const fr = frame(e.msg(2))
+      // Field 4 names the attachment in decks PDFlip wrote; after Goodnotes re-saves a deck it holds
+      // an internal image id instead and the header's field 7 names the file.
       const att = e.str(4)
-      const bytes = att ? await read('attachments/' + att) : undefined
+      const file = id ? headerFiles.get(id) : undefined
+      const bytes = (att ? await read('attachments/' + att) : undefined) ?? (file ? await read('attachments/' + file) : undefined)
       if (fr && bytes) images.push({ ...fr, data: bytes, z })
     } else if (kind === 8) {
       const fr = frame(e.msg(2))
