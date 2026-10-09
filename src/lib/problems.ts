@@ -7,7 +7,12 @@ import { repo } from '../site.config'
 import type { Skipped } from './goodnotes/model'
 
 export type Area = 'pdf-to-goodnotes' | 'goodnotes-to-pdf'
-export type ProblemKind = 'missing-character-map' | 'unsupported-characters' | 'unreadable-part' | 'unexpected-error'
+export type ProblemKind =
+  | 'missing-character-map'
+  | 'pdf-reader-warning'
+  | 'unsupported-characters'
+  | 'unreadable-part'
+  | 'unexpected-error'
 export type DetailValue = string | number | string[]
 
 export interface Problem {
@@ -62,6 +67,36 @@ export function missingCharacterMapProblem(cmaps: string[], pdfjsVersion: string
     title: `PDF text needs character maps PDFlip does not ship (${what})`,
     message: `This PDF contains ${what} text that PDFlip cannot display yet. That text will be missing from your cards.`,
     details: { characterMaps: cmaps, scripts, pdfjs: pdfjsVersion },
+  }
+}
+
+/**
+ * pdf.js warnings that are harmless for PDFlip or already reported as another problem:
+ * missing character maps (own report), repaired cross-reference tables (the PDF still opens),
+ * TrueType hinting instructions (only affect tiny font sizes on screen).
+ */
+const IGNORED_WARNINGS = [/cMapUrl|CMap/i, /^Indexing all PDF objects/, /^TT: /, /^Invalid absolute docBaseUrl/]
+
+/** Warnings worth a report, with numbers and object ids removed so equal problems match. */
+export function reportableWarnings(warnings: string[]): string[] {
+  const out = new Set<string>()
+  for (const w of warnings) {
+    if (IGNORED_WARNINGS.some((re) => re.test(w))) continue
+    out.add(w.replace(/\d+/g, 'n').replace(/"[^"]{40,}"/g, '"…"').slice(0, 200))
+  }
+  return [...out].slice(0, 5)
+}
+
+export function pdfReaderWarningProblem(warnings: string[], pdfjsVersion: string): Problem | null {
+  const reportable = reportableWarnings(warnings)
+  if (reportable.length === 0) return null
+  return {
+    area: 'pdf-to-goodnotes',
+    kind: 'pdf-reader-warning',
+    signature: `pdf.reader-warning:${slug(reportable[0])}`,
+    title: `PDF reader could not handle part of a PDF: ${reportable[0].slice(0, 90)}`,
+    message: 'Parts of this PDF may be missing or look different on your cards: the PDF reader could not handle everything in it.',
+    details: { warnings: reportable, pdfjs: pdfjsVersion },
   }
 }
 

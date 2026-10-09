@@ -1,4 +1,12 @@
-import { browserSummary, cmapScript, isUnexpected, missingCharacterMapProblem, unsupportedCharactersProblem } from '../problems'
+import {
+  browserSummary,
+  cmapScript,
+  isUnexpected,
+  missingCharacterMapProblem,
+  pdfReaderWarningProblem,
+  reportableWarnings,
+  unsupportedCharactersProblem,
+} from '../problems'
 import { MAX_PDF_BYTES, readGoodnotesFile, readPdfFile } from '../fileCheck'
 import { readFileSync, existsSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
@@ -481,6 +489,19 @@ describe('problem reports', () => {
     expect(p).toMatchObject({ kind: 'unsupported-characters', signature: 'gn.unsupported-chars:han-chinese-japanese-kanji' })
     expect(p.details.examples).toHaveLength(3)
     expect(JSON.stringify(p)).not.toContain('光')
+  })
+
+  it('reports PDF reader warnings, minus harmless and already-covered ones', () => {
+    const warnings = [
+      'Indexing all PDF objects',
+      'loadFont - translateFont failed: "UnknownErrorException: Ensure that the `cMapUrl` and `cMapPacked` API parameters are provided.".',
+      'TT: undefined function: 12',
+      'Image dimensions are missing, or not numbers.',
+      'Unable to decode image 17R: broken',
+    ]
+    expect(reportableWarnings(warnings)).toEqual(['Image dimensions are missing, or not numbers.', 'Unable to decode image nR: broken'])
+    expect(pdfReaderWarningProblem(['Indexing all PDF objects'], '4.10.38')).toBeNull()
+    expect(pdfReaderWarningProblem(warnings, '4.10.38')?.signature).toBe('pdf.reader-warning:image-dimensions-are-missing-or-not-numbers.')
   })
 
   it('tells our own messages apart from bugs', () => {

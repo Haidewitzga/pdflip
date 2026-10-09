@@ -34,7 +34,7 @@ export const LIMITS = {
   closedGraceDays: 14,
 }
 
-const KINDS = ['missing-character-map', 'unsupported-characters', 'unreadable-part', 'unexpected-error'] as const
+const KINDS = ['missing-character-map', 'pdf-reader-warning', 'unsupported-characters', 'unreadable-part', 'unexpected-error'] as const
 const AREAS = ['pdf-to-goodnotes', 'goodnotes-to-pdf'] as const
 type Kind = (typeof KINDS)[number]
 type Area = (typeof AREAS)[number]
@@ -111,6 +111,8 @@ const AREA_NAMES: Record<Area, string> = { 'pdf-to-goodnotes': 'PDF → Goodnote
 const HINTS: Record<Kind, string> = {
   'missing-character-map':
     'pdf.js asked for the character maps (CMaps) listed above while drawing the pages, and PDFlip ships none, so that text is missing from the cards. Start in `src/lib/pdfToCards.ts` (`openPdf`, `RecordingCMapReader`). Reproduce with a PDF that uses a non-embedded CID font with one of these CMaps (e.g. reportlab `UnicodeCIDFont`).',
+  'pdf-reader-warning':
+    'pdf.js logged these warnings while reading or drawing the PDF and carried on without that part, so it is probably missing from the cards. Find the warning text in `node_modules/pdfjs-dist/build/pdf.worker.mjs` to see what pdf.js gave up on, then check whether a pdf.js option, a pdf.js update or PDFlip code can handle it. Start in `src/lib/pdfToCards.ts`. Numbers in the warnings are replaced by `n`.',
   'unsupported-characters':
     'No bundled font has glyphs for these scripts, so the characters are drawn as "?". Start in `src/lib/fonts.ts` (`FontBook`) and `public/fonts/`. Mind the size of any added font (the site is cached for offline use).',
   'unreadable-part':

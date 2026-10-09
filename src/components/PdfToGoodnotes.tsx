@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   missingCharacterMaps,
+  readerWarnings,
   openPdf,
   pageSizes,
   PdfOpenError,
@@ -10,7 +11,7 @@ import {
   type CardSpec,
   type PdfDoc,
 } from '../lib/pdfToCards'
-import { isUnexpected, missingCharacterMapProblem, unexpectedErrorProblem, type Problem } from '../lib/problems'
+import { isUnexpected, missingCharacterMapProblem, pdfReaderWarningProblem, unexpectedErrorProblem, type Problem } from '../lib/problems'
 import { readPdfFile } from '../lib/fileCheck'
 import { detectPdflipLayout, type PdflipLayout } from '../lib/pdflipLayout'
 import { autoMarks, MODES, pairMarks, restorePdflipCards, splitPages, type Mark, type Mode } from '../lib/pairing'
@@ -41,12 +42,15 @@ export default function PdfToGoodnotes() {
 
   const pageCount = doc?.numPages ?? 0
 
-  /** Reports text the PDF needs character maps for (found while its pages were drawn). */
-  function checkCharacterMaps(d: PdfDoc) {
+  /** Reports what the PDF reader could not handle while it drew the pages (character maps, warnings). */
+  function checkPdf(d: PdfDoc) {
     const cmaps = missingCharacterMaps(d)
-    if (cmaps.length === 0) return
-    const problem = missingCharacterMapProblem(cmaps, PDFJS_VERSION)
-    setProblems((ps) => [...ps.filter((p) => p.kind !== problem.kind), problem])
+    const found = [
+      cmaps.length ? missingCharacterMapProblem(cmaps, PDFJS_VERSION) : null,
+      pdfReaderWarningProblem(readerWarnings(d), PDFJS_VERSION),
+    ].filter((p): p is Problem => !!p)
+    if (found.length === 0) return
+    setProblems((ps) => [...ps.filter((p) => !found.some((f) => f.kind === p.kind)), ...found])
   }
 
   function reportError(stage: string, e: unknown) {
@@ -88,7 +92,7 @@ export default function PdfToGoodnotes() {
         })
         setThumbsDone(p)
       }
-      checkCharacterMaps(d)
+      checkPdf(d)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       reportError('opening the PDF', e)
@@ -166,7 +170,7 @@ export default function PdfToGoodnotes() {
     try {
       const bytes = await pdfToDeck(doc, title.trim() || 'Flashcards', cards, (d, t) => setProgress([d, t]))
       setResult(bytes)
-      checkCharacterMaps(doc)
+      checkPdf(doc)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       reportError('creating the deck', e)
