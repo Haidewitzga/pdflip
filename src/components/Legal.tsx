@@ -1,5 +1,3 @@
-import { imprint, testedWith } from '../site.config'
-
 export function Privacy() {
   return (
     <section className="legal">
@@ -26,8 +24,7 @@ export function Privacy() {
       <h2>Your rights</h2>
       <p>
         Under the GDPR you have the right to access, rectification, erasure, restriction of processing, objection and data
-        portability, and the right to lodge a complaint with a supervisory authority. Contact details are in the{' '}
-        <a href="#imprint">imprint</a>.
+        portability, and the right to lodge a complaint with a supervisory authority.
       </p>
 
       <h1 lang="de">Datenschutz</h1>
@@ -36,44 +33,6 @@ export function Privacy() {
         ausschließlich lokal in deinem Browser. Es werden keine Dateien hochgeladen oder gespeichert. Keine Cookies, kein
         Tracking, keine Werbung. Die Website wird über GitHub Pages (GitHub Inc., USA) bereitgestellt; dabei verarbeitet
         GitHub technisch notwendige Daten wie deine IP-Adresse in Server-Logs (Art. 6 Abs. 1 lit. f DSGVO).
-      </p>
-    </section>
-  )
-}
-
-export function Imprint() {
-  const filled = imprint.name && imprint.street && imprint.city && imprint.email
-  return (
-    <section className="legal">
-      <h1>Imprint / Impressum</h1>
-      {filled ? (
-        <address>
-          {imprint.name}
-          <br />
-          {imprint.street}
-          <br />
-          {imprint.city}
-          {imprint.country && (
-            <>
-              <br />
-              {imprint.country}
-            </>
-          )}
-          <br />
-          E-Mail: <a href={`mailto:${imprint.email}`}>{imprint.email}</a>
-        </address>
-      ) : (
-        <p className="muted">Contact details will be added here.</p>
-      )}
-      <h2>About this project</h2>
-      <p>
-        PDFlip is a free, non-commercial, open-source tool. It is not affiliated with, endorsed by, or connected to
-        Goodnotes. Goodnotes is a trademark of its respective owner and is mentioned only to describe file compatibility.
-      </p>
-      <p>
-        The Goodnotes file format is not publicly documented; PDFlip's support is based on analysing exported files and
-        has been tested with {testedWith}. Other versions may not work. Use at your own risk and keep backups of your
-        original decks.
       </p>
     </section>
   )
