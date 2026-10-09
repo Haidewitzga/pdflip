@@ -1,0 +1,46 @@
+// In-memory representation of a Goodnotes flashcard deck.
+
+/** Card canvas size in points, as used by Goodnotes' 16:10 card template. */
+export const CARD_W = 1193.28
+export const CARD_H = 745.8
+
+export type RGBA = [number, number, number, number]
+
+export interface Stroke {
+  color: RGBA
+  width: number
+  /** Start point followed by quadratic segments: [qx, qy, x, y, qx, qy, x, y, ...] */
+  start: [number, number]
+  segments: number[]
+}
+
+export interface CanvasImage {
+  x: number
+  y: number
+  w: number
+  h: number
+  data: Uint8Array
+}
+
+export interface TextBox {
+  x: number
+  y: number
+  w: number
+  h: number
+  text: string
+  fontSize: number
+}
+
+export type Side =
+  | { kind: 'text'; text: string }
+  | { kind: 'canvas'; strokes: Stroke[]; images: CanvasImage[]; texts: TextBox[] }
+
+export interface Card {
+  front: Side
+  back: Side
+}
+
+export interface Deck {
+  title: string
+  cards: Card[]
+}
