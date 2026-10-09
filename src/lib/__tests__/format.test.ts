@@ -101,6 +101,25 @@ describe('deck writer', () => {
   })
 })
 
+describe('deck reader', () => {
+  it('reads picture card sides', async () => {
+    const side = (content: Msg) => new Msg().bytes(1, content).bytes(2, new Msg().int(1, 1).int(2, 5))
+    const card = new Msg()
+      .bytes(1, 'CARD')
+      .bytes(3, new Msg().bytes(1, 'A'))
+      .bytes(4, side(new Msg().bytes(2, new Msg().bytes(1, 'image/png').bytes(2, 'PIC'))))
+      .bytes(5, side(new Msg().bytes(1, new Msg().bytes(1, 'text/plain').bytes(2, 'Answer'))))
+    const zip = new JSZip()
+    zip.file('index.events.pb', writeStream([new Msg().bytes(1, 'CARD').bytes(152, card)]))
+    zip.file('attachments/PIC', PNG)
+    const deck = await readDeck(await zip.generateAsync({ type: 'uint8array' }))
+    expect(deck.cards[0].front).toEqual({ kind: 'image', data: PNG })
+    expect(deck.cards[0].back).toEqual({ kind: 'text', text: 'Answer' })
+    const pdf = await deckToPdf(deck, { layout: 'pages', labels: false })
+    expect(pdf.length).toBeGreaterThan(500)
+  })
+})
+
 // Optional check against a real Goodnotes export: GOODNOTES_SAMPLE=/path/to/deck.goodnotes npm test
 const sample = process.env.GOODNOTES_SAMPLE
 describe.skipIf(!sample || !existsSync(sample))('real Goodnotes deck', () => {
