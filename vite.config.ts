@@ -11,7 +11,8 @@ import { join, relative, sep } from 'node:path'
  */
 const CSP = [
   "default-src 'self'",
-  "script-src 'self'",
+  // WebAssembly (the SQLite engine for Anki decks) needs 'wasm-unsafe-eval'; it allows no JavaScript eval
+  "script-src 'self' 'wasm-unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self'",

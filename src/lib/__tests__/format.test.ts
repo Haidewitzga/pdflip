@@ -1,3 +1,5 @@
+import initSqlJs from 'sql.js'
+import { writeApkg } from '../anki/write'
 import { MAX_PDF_BYTES, readGoodnotesFile, readPdfFile } from '../fileCheck'
 import { readFileSync, existsSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
@@ -449,5 +451,36 @@ describe('file checks', () => {
   it('rejects files that are too large', async () => {
     const big = { name: 'a.pdf', size: MAX_PDF_BYTES + 1 } as File
     await expect(readPdfFile(big)).rejects.toThrow('too large')
+  })
+})
+
+describe('Anki packages', () => {
+  it('writes notes, cards and pictures that Anki can import', async () => {
+    const SQL = await initSqlJs()
+    const img = (n: number) => Uint8Array.from([0xff, 0xd8, 0xff, n])
+    const bytes = await writeApkg({ title: 'Biology', cards: [{ front: img(1), back: img(2) }, { front: img(3), back: img(4) }] }, SQL)
+    const zip = await JSZip.loadAsync(bytes)
+    const media = JSON.parse(await zip.file('media')!.async('string')) as Record<string, string>
+    expect(Object.keys(media)).toHaveLength(4)
+    expect(await zip.file('0')!.async('uint8array')).toEqual(img(1))
+
+    const db = new SQL.Database(await zip.file('collection.anki2')!.async('uint8array'))
+    const [col] = db.exec('SELECT ver, decks, models FROM col')[0].values
+    expect(col[0]).toBe(11)
+    const decks = Object.values(JSON.parse(col[1] as string)) as { name: string }[]
+    expect(decks.map((d) => d.name)).toContain('Biology')
+    const model = Object.values(JSON.parse(col[2] as string))[0] as { flds: { name: string }[] }
+    expect(model.flds.map((f) => f.name)).toEqual(['Front', 'Back'])
+
+    const notes = db.exec('SELECT flds FROM notes ORDER BY id')[0].values.map((r) => (r[0] as string).split('\x1f'))
+    expect(notes).toEqual([
+      [`<img src="${media['0']}">`, `<img src="${media['1']}">`],
+      [`<img src="${media['2']}">`, `<img src="${media['3']}">`],
+    ])
+    expect(db.exec('SELECT due, type, queue FROM cards ORDER BY due')[0].values).toEqual([
+      [1, 0, 0],
+      [2, 0, 0],
+    ])
+    db.close()
   })
 })

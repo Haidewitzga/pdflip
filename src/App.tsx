@@ -31,14 +31,14 @@ export default function App() {
           <img src={`${import.meta.env.BASE_URL}favicon.svg`} alt="" width={32} height={32} />
           <span>PDFlip</span>
         </a>
-        <p className="tagline">Convert Goodnotes flashcards to PDF, and PDFs to Goodnotes flashcards.</p>
+        <p className="tagline">Convert Goodnotes flashcards to PDF, and PDFs to Goodnotes or Anki flashcards.</p>
       </header>
 
       <main>
         {tool && (
           <nav className="tabs" aria-label="Converter">
             <a href="#to-goodnotes" aria-current={route === 'to-goodnotes' ? 'page' : undefined}>
-              PDF → Goodnotes flashcards
+              PDF → Flashcards
             </a>
             <a href="#to-pdf" aria-current={route === 'to-pdf' ? 'page' : undefined}>
               Goodnotes flashcards → PDF
@@ -61,8 +61,8 @@ export default function App() {
           tracking.
         </p>
         <p>
-          PDFlip is an independent project and is not affiliated with, endorsed by, or connected to Goodnotes. Goodnotes
-          is a trademark of its respective owner. Experimental – tested with {testedWith}; keep a backup of your original
+          PDFlip is an independent project and is not affiliated with, endorsed by, or connected to Goodnotes or Anki.
+          Goodnotes and Anki are trademarks of their respective owners. Experimental – tested with {testedWith}; keep a backup of your original
           decks.
         </p>
         <p className="footer-links">
