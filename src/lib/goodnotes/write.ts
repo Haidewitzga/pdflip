@@ -5,19 +5,12 @@ import { CARD_H, CARD_W } from './model'
 
 /** An image placed on one side of a card, in card coordinates (points). */
 export interface SideImage {
-  /** PNG or JPEG bytes (or, experimentally, a one-page PDF). Optional when a background PDF is given. */
-  data?: Uint8Array
+  /** PNG or JPEG bytes. */
+  data: Uint8Array
   x: number
   y: number
   w: number
   h: number
-  /**
-   * Experimental: a one-page PDF used as this side's page background instead of the blank card
-   * template, so text stays vector with its original fonts. Should be CARD_W × CARD_H.
-   */
-  backgroundPdf?: Uint8Array
-  /** Whether the background page still names Goodnotes' built-in card template (default true). */
-  backgroundTemplateId?: boolean
 }
 
 export interface NewCard {
@@ -95,13 +88,18 @@ export async function writeDeck(deck: NewDeck): Promise<Uint8Array> {
     event(30, docId, body)
   }
 
-  /** A card page: the background PDF every canvas on it is drawn over. */
-  const addPage = (backgroundAtt: string, templateId = true) => {
-    const pageId = uuid4()
-    const body = new Msg().bytes(1, docId).bytes(2, pageId).bytes(4, backgroundAtt).int(5, 1).int(6, 1)
-    body.bytes(8, new Msg().f32(1, CARD_W).f32(2, CARD_H))
-    if (templateId) body.bytes(9, CARD_TEMPLATE_ID)
-    body
+  // Card template page with a blank PDF background
+  const templateAtt = addAttachment(deck.templatePdf)
+  const pageId = uuid4()
+  {
+    const body = new Msg()
+      .bytes(1, docId)
+      .bytes(2, pageId)
+      .bytes(4, templateAtt)
+      .int(5, 1)
+      .int(6, 1)
+      .bytes(8, new Msg().f32(1, CARD_W).f32(2, CARD_H))
+      .bytes(9, CARD_TEMPLATE_ID)
       .f64(10, now)
       .bytes(11, uuid4())
       .bytes(12, new Msg().bytes(2, clock()))
@@ -112,19 +110,14 @@ export async function writeDeck(deck: NewDeck): Promise<Uint8Array> {
       .bytes(19, new Msg().bytes(2, clock()))
       .int(21, SCHEMA)
     event(2, pageId, body)
-    return pageId
   }
-
-  // Card template page with a blank PDF background, shared by all plain card sides
-  const pageId = addPage(addAttachment(deck.templatePdf))
 
   const orderKeys = fractionalKeys(deck.cards.length)
   let canvasIndex = 0
 
   /** Creates a canvas (one card side) holding a single image; returns its id. */
   const addCanvas = (img: SideImage) => {
-    const att = img.data ? addAttachment(img.data) : null
-    const sidePage = img.backgroundPdf ? addPage(addAttachment(img.backgroundPdf), img.backgroundTemplateId ?? true) : pageId
+    const att = addAttachment(img.data)
     const canvasId = canvasUuid()
     const noteId = uuidPlusOne(canvasId)
     const background = new Msg().bytes(
@@ -139,7 +132,7 @@ export async function writeDeck(deck: NewDeck): Promise<Uint8Array> {
     const canvas = new Msg()
       .bytes(1, docId)
       .bytes(2, canvasId)
-      .bytes(3, new Msg().bytes(1, sidePage).bytes(2, clock()))
+      .bytes(3, new Msg().bytes(1, pageId).bytes(2, clock()))
       .bytes(4, new Msg().bytes(1, '4' + fractionalKeys(1, ++canvasIndex)[0]).bytes(2, clock()))
     stamp(canvas, 14, 13).int(15, SCHEMA).bytes(17, background.bytes(2, clock()))
     event(54, canvasId, canvas)
@@ -148,10 +141,6 @@ export async function writeDeck(deck: NewDeck): Promise<Uint8Array> {
     stamp(reg, 14, 13).int(15, SCHEMA).bytes(16, docId)
     event(102, noteId, reg)
 
-    if (!att) {
-      notes.push([noteId, new Uint8Array()])
-      return canvasId
-    }
     const elemId = uuid4()
     const elemClockRand = randomU32()
     const elemClock = () => new Msg().int(1, 1).int(2, elemClockRand)
