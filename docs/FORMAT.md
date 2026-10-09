@@ -51,6 +51,11 @@ The element message is `{<kind>: element}`:
 
 Coordinates are points on a 1193.28 × 745.8 canvas, origin top-left.
 
+**Layering:** elements are stacked by a counter, not by their position in the file: field `7` of ink
+strokes and field `5` of images and text boxes hold `{1: {1: counter, 2: random}}`; higher counters
+are drawn on top. (For example, a picture pasted early can sit above strokes written before it and
+below everything written after.) Ink widths are used as stored, in points.
+
 ### Stroke blob
 
 Apple LZ4 (`bv41` blocks, `bv4$` terminator) containing a typed structure `tpl\0`, `u32 length`, the signature

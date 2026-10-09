@@ -6,7 +6,12 @@ export const CARD_H = 745.8
 
 export type RGBA = [number, number, number, number]
 
-export interface Stroke {
+/** Drawing order on the canvas: higher values are drawn later, on top. */
+interface Layered {
+  z?: number
+}
+
+export interface Stroke extends Layered {
   color: RGBA
   width: number
   /** Start point followed by quadratic segments: [qx, qy, x, y, qx, qy, x, y, ...] */
@@ -15,12 +20,12 @@ export interface Stroke {
 }
 
 /** Ink stored as filled outlines: each subpath is a start point plus cubic curves [c1x, c1y, c2x, c2y, x, y, ...]. */
-export interface FilledInk {
+export interface FilledInk extends Layered {
   color: RGBA
   subpaths: { start: [number, number]; curves: number[] }[]
 }
 
-export interface CanvasImage {
+export interface CanvasImage extends Layered {
   x: number
   y: number
   w: number
@@ -28,7 +33,7 @@ export interface CanvasImage {
   data: Uint8Array
 }
 
-export interface TextBox {
+export interface TextBox extends Layered {
   x: number
   y: number
   w: number

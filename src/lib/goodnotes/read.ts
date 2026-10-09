@@ -132,27 +132,31 @@ async function readCanvas(data: Uint8Array, read: (n: string) => Promise<Uint8Ar
   const fills: FilledInk[] = []
   const images: CanvasImage[] = []
   const texts: TextBox[] = []
-  for (const [kind, e] of elements) {
+  for (const [index, [kind, e]] of elements.entries()) {
     const id = e.str(1)
+    // Goodnotes layers elements by a counter (field 7 for ink, 5 for images and text boxes),
+    // not by their position in the file; the file position only breaks ties.
+    const layer = e.msg(kind === 7 ? 7 : 5)?.msg(1)?.int(1)
+    const z = (layer !== undefined ? Number(layer) : 0) + index / 1e7
     if ((id && deleted.has(id)) || e.int(14) === 1n) continue
     if (kind === 7) {
       const s = readStroke(e)
-      if (s && 'segments' in s) strokes.push(s)
+      if (s && 'segments' in s) strokes.push({ ...s, z })
       else if (s) {
-        strokes.push(...s.lines)
-        if (s.fill) fills.push(s.fill)
+        if (s.fill) fills.push({ ...s.fill, z })
+        strokes.push(...s.lines.map((l) => ({ ...l, z })))
       }
     } else if (kind === 1 && e.has(4)) {
       const fr = frame(e.msg(2))
       const att = e.str(4)
       const bytes = att ? await read('attachments/' + att) : undefined
-      if (fr && bytes) images.push({ ...fr, data: bytes })
+      if (fr && bytes) images.push({ ...fr, data: bytes, z })
     } else if (kind === 8) {
       const fr = frame(e.msg(2))
       const rtf = e.str(6)
       if (fr && rtf) {
         const scale = e.msg(4)?.num(1, 1) || 1
-        texts.push({ ...fr, text: rtfToText(rtf), fontSize: rtfFontSize(rtf) * scale })
+        texts.push({ ...fr, text: rtfToText(rtf), fontSize: rtfFontSize(rtf) * scale, z })
       }
     }
   }
