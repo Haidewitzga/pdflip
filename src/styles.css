@@ -299,17 +299,6 @@ input:focus-visible {
 .thumb.top-bottom .half.a {
   bottom: 0;
 }
-.thumb.left-right .half {
-  top: 0;
-  bottom: 0;
-  width: 50%;
-}
-.thumb.left-right .half.q {
-  left: 0;
-}
-.thumb.left-right .half.a {
-  right: 0;
-}
 
 .badge {
   font-weight: 700;

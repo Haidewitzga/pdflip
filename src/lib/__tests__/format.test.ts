@@ -69,7 +69,7 @@ describe('pairing', () => {
     expect(pairMarks(['Q', 'Q', 'A', 'A']).unpaired).toEqual([1, 4])
   })
   it('splits pages into halves', () => {
-    expect(splitPages(2, 'top-bottom')[1].back.crop).toEqual({ x: 0, y: 0.5, w: 1, h: 0.5 })
+    expect(splitPages(2)[1].back.crop).toEqual({ x: 0, y: 0.5, w: 1, h: 0.5 })
   })
 })
 
@@ -244,7 +244,7 @@ describe('PDFlip round trip', () => {
 
   it('maps each side to its card area at full size', () => {
     const stacked = { layout: 'stacked' as const, labels: true }
-    const [card] = restorePdflipCards(splitPages(1, 'top-bottom'), stacked)
+    const [card] = restorePdflipCards(splitPages(1), stacked)
     const [top, bottom] = pdflipRegions(stacked)
     expect(card.front).toEqual({ page: 1, ...top })
     expect(card.back).toEqual({ page: 1, ...bottom })

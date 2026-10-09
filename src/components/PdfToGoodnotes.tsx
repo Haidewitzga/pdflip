@@ -93,8 +93,8 @@ export default function PdfToGoodnotes() {
     const labels = new Map<number, string>()
     let cards: CardSpec[]
     let unpaired: number[] = []
-    if (mode === 'top-bottom' || mode === 'left-right') {
-      cards = splitPages(pageCount, mode, skipped)
+    if (mode === 'top-bottom') {
+      cards = splitPages(pageCount, skipped)
       cards.forEach((c, i) => labels.set(c.front.page, `Card ${i + 1}`))
     } else {
       const res = pairMarks(mode === 'manual' ? marks : autoMarks(pageCount, skipped))
@@ -128,7 +128,7 @@ export default function PdfToGoodnotes() {
   }
 
   const outName = `${safeFilename(title || 'Flashcards')}.goodnotes`
-  const isSplit = mode === 'top-bottom' || mode === 'left-right'
+  const isSplit = mode === 'top-bottom'
   useEffect(() => () => void doc?.destroy(), [doc])
 
   return (
