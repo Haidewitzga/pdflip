@@ -139,11 +139,11 @@ export async function readDeck(file: ArrayBuffer | Uint8Array): Promise<Deck> {
   const skipped = new Map<string, Skipped>()
   for (const [i, c] of ordered.entries()) {
     const sides = (['question', 'answer'] as const).map((side) => {
-      const skip: Skip = (what) => {
+      const skip: Skip = (what, detail) => {
         const key = `${i}|${side}|${what}`
         const cur = skipped.get(key)
         if (cur) cur.count++
-        else skipped.set(key, { card: i + 1, side, what, count: 1 })
+        else skipped.set(key, { card: i + 1, side, what, count: 1, ...(detail ? { detail } : {}) })
       }
       return readSide((side === 'question' ? c.front : c.back)?.value, read, skip)
     })
@@ -152,8 +152,33 @@ export async function readDeck(file: ArrayBuffer | Uint8Array): Promise<Deck> {
   return { title, cards: out, skipped: [...skipped.values()] }
 }
 
-/** Records one part of a card side that could not be read. */
-type Skip = (what: string) => void
+/**
+ * Records one part of a card side that could not be read. `detail` is a technical fingerprint of
+ * its structure (field numbers, type signature, a few header bytes) for problem reports; it never
+ * contains text or images from the card.
+ */
+type Skip = (what: string, detail?: string) => void
+
+const fieldList = (v: View) => [...new Set(v.fields.map((f) => f.f))].join(',')
+const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join(' ')
+
+/** Structure of an ink element we could not decode: its fields and its ink payload's type signature. */
+function inkFingerprint(e: View): string {
+  const parts = [`fields=${fieldList(e)}`]
+  const blob = e.bytes(2)
+  if (blob) {
+    try {
+      const raw = decodeBv41(blob)
+      const nul = raw.indexOf(0, 8)
+      parts.push(`signature=${nul > 8 ? ascii.decode(raw.subarray(8, nul)) : '?'}`)
+      // the first bytes after the signature are counts and widths, never coordinates of the drawing
+      parts.push(`head=${hex(raw.subarray(nul + 1, nul + 1 + 14))}`, `payloadBytes=${raw.length - nul - 1}`)
+    } catch (err) {
+      parts.push(`decodeError=${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+  return parts.join('; ')
+}
 
 async function readSide(v: View | undefined, read: (n: string) => Promise<Uint8Array | undefined>, skip: Skip): Promise<Side> {
   const content = v?.msg(1)
@@ -177,7 +202,7 @@ async function readSide(v: View | undefined, read: (n: string) => Promise<Uint8A
     return { kind: 'text', text: text ?? '' }
   }
   // A kind of card content we have not seen in an export yet
-  skip('card side (unknown kind)')
+  skip('card side (unknown kind)', `fields=${fieldList(content)}`)
   return { kind: 'text', text: '' }
 }
 
@@ -216,7 +241,7 @@ async function readCanvas(data: Uint8Array, read: (n: string) => Promise<Uint8Ar
     if ((id && deleted.has(id)) || e.int(14) === 1n) continue
     if (kind === 7) {
       const s = readStroke(e)
-      if (!s) skip('pen stroke')
+      if (!s) skip('pen stroke', inkFingerprint(e))
       else if ('segments' in s) strokes.push({ ...s, z })
       else {
         if (s.fill) fills.push({ ...s.fill, z })
@@ -239,9 +264,9 @@ async function readCanvas(data: Uint8Array, read: (n: string) => Promise<Uint8Ar
         const scale = e.msg(4)?.num(1, 1) || 1
         const runs = parseRtf(rtf).map((r) => ({ ...r, size: r.size * scale }))
         texts.push({ ...fr, text: runs.map((r) => r.text).join(''), fontSize: (runs[0]?.size ?? 24 * scale), runs, z })
-      } else skip('text box')
+      } else skip('text box', `fields=${fieldList(e)}; frame=${!!fr}; rtf=${!!rtf}`)
     } else {
-      skip('item (unknown kind)')
+      skip('item (unknown kind)', `kind=${kind}; fields=${fieldList(e)}`)
     }
   }
   return { kind: 'canvas', strokes, fills, images, texts }

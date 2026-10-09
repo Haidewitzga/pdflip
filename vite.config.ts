@@ -3,6 +3,11 @@ import react from '@vitejs/plugin-react'
 import { createHash } from 'node:crypto'
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
+import { execSync } from 'node:child_process'
+import { reportUrl } from './src/site.config'
+
+/** The problem-report relay: site.config.ts, or PDFLIP_REPORT_URL for test builds. */
+const relayUrl = process.env.PDFLIP_REPORT_URL ?? reportUrl
 
 /**
  * Content Security Policy for the published site: the page may only load its own scripts, styles,
@@ -16,7 +21,8 @@ const CSP = [
   "img-src 'self' data: blob:",
   "font-src 'self'",
   "worker-src 'self' blob:",
-  "connect-src 'self' data: blob:",
+  // the problem-report relay, when one is configured
+  `connect-src 'self' data: blob:${relayUrl ? ' ' + new URL(relayUrl).origin : ''}`,
   "object-src 'none'",
   "base-uri 'none'",
   "form-action 'none'",
@@ -59,8 +65,19 @@ function serviceWorker(): Plugin {
   }
 }
 
+/** Short commit id of the build, shown in problem reports so a fix can find the exact code. */
+function buildVersion(): string {
+  if (process.env.GITHUB_SHA) return process.env.GITHUB_SHA.slice(0, 7)
+  try {
+    return execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
+  } catch {
+    return 'dev'
+  }
+}
+
 // Served from https://<user>.github.io/pdflip/
 export default defineConfig({
   base: '/pdflip/',
   plugins: [react(), contentSecurityPolicy(), serviceWorker()],
+  define: { __PDFLIP_VERSION__: JSON.stringify(buildVersion()), __PDFLIP_REPORT_URL__: JSON.stringify(relayUrl) },
 })

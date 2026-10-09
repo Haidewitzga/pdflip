@@ -18,12 +18,52 @@ export async function pageSizes(doc: PdfDoc): Promise<{ w: number; h: number }[]
   return out
 }
 
+/** pdf.js version, for problem reports. */
+export const PDFJS_VERSION = pdfjs.version
+
+/**
+ * Character maps (CMaps) a PDF asked for while it was drawn. PDFs with fonts that are not embedded
+ * in the file, typically Chinese, Japanese or Korean text, need them; PDFlip does not ship any yet,
+ * so that text is missing from the rendered pages. Filled while pages are rendered.
+ */
+const missingCMaps = new WeakMap<PdfDoc, Set<string>>()
+
+export function missingCharacterMaps(doc: PdfDoc): string[] {
+  return [...(missingCMaps.get(doc) ?? [])].sort()
+}
+
+/** Thrown for PDFs that cannot be opened; `technical` carries pdf.js's own message for reports. */
+export class PdfOpenError extends Error {
+  constructor(
+    message: string,
+    readonly technical?: string,
+  ) {
+    super(message)
+  }
+}
+
 export async function openPdf(data: ArrayBuffer): Promise<PdfDoc> {
+  const requested = new Set<string>()
+  // pdf.js asks this factory (on the page, not in its worker) for every character map it needs.
+  class RecordingCMapReader {
+    async fetch({ name }: { name: string }): Promise<never> {
+      requested.add(name)
+      throw new Error('Ensure that the `cMapUrl` and `cMapPacked` API parameters are provided.')
+    }
+  }
   try {
-    return await pdfjs.getDocument({ data: new Uint8Array(data), isEvalSupported: false, enableXfa: false }).promise
+    const doc = await pdfjs.getDocument({
+      data: new Uint8Array(data),
+      isEvalSupported: false,
+      enableXfa: false,
+      CMapReaderFactory: RecordingCMapReader,
+      useWorkerFetch: false,
+    }).promise
+    missingCMaps.set(doc, requested)
+    return doc
   } catch (e) {
     if (e instanceof Error && e.name === 'PasswordException') throw new Error('This PDF is password-protected. Remove the password and try again.')
-    throw new Error('Could not read this PDF.')
+    throw new PdfOpenError('Could not read this PDF.', e instanceof Error ? `${e.name}: ${e.message}` : String(e))
   }
 }
 

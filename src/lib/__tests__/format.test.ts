@@ -1,3 +1,4 @@
+import { browserSummary, cmapScript, isUnexpected, missingCharacterMapProblem, unsupportedCharactersProblem } from '../problems'
 import { MAX_PDF_BYTES, readGoodnotesFile, readPdfFile } from '../fileCheck'
 import { readFileSync, existsSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
@@ -250,7 +251,9 @@ describe('snapped shapes and skipped parts', () => {
   it('lists parts it could not read', async () => {
     const unknownShape = shapeStroke(new Msg().bytes(7, new Msg().int(1, 1)))
     const deck = await readDeck(await deckWithStroke(unknownShape))
-    expect(deck.skipped).toEqual([{ card: 1, side: 'question', what: 'pen stroke', count: 1 }])
+    expect(deck.skipped).toMatchObject([{ card: 1, side: 'question', what: 'pen stroke', count: 1 }])
+    // a technical fingerprint for problem reports: the ink's type signature and element fields
+    expect(deck.skipped![0].detail).toMatch(/fields=1,2,4,9; signature=vuA\(v\)A\(S\(uu\)\)/)
   })
 
   it('explains that a file without flashcards is not a deck', async () => {
@@ -449,5 +452,48 @@ describe('file checks', () => {
   it('rejects files that are too large', async () => {
     const big = { name: 'a.pdf', size: MAX_PDF_BYTES + 1 } as File
     await expect(readPdfFile(big)).rejects.toThrow('too large')
+  })
+})
+
+describe('problem reports', () => {
+  it('names the writing system of missing PDF character maps', () => {
+    expect(cmapScript('UniGB-UCS2-H')).toBe('Simplified Chinese')
+    expect(cmapScript('UniCNS-UTF16-H')).toBe('Traditional Chinese')
+    expect(cmapScript('UniJIS-UCS2-H')).toBe('Japanese')
+    expect(cmapScript('UniKS-UCS2-H')).toBe('Korean')
+    const p = missingCharacterMapProblem(['UniGB-UCS2-H'], '4.10.38')
+    expect(p).toMatchObject({ kind: 'missing-character-map', signature: 'pdf.missing-cmap:unigb-ucs2-h' })
+    expect(p.message).toContain('Simplified Chinese')
+  })
+
+  it('reports Chinese card text that no font can show, without the text itself', async () => {
+    let chars: string[] = []
+    const deck = { title: 't', cards: [{ front: { kind: 'text' as const, text: 'Photosynthese 光合作用 θ' }, back: { kind: 'text' as const, text: 'x' } }] }
+    await deckToPdf(deck, {
+      layout: 'pages',
+      labels: false,
+      loadUnicodeFont: async () => new Uint8Array(readFileSync('public/fonts/DejaVuSans.ttf')),
+      onUnsupportedCharacters: (c) => (chars = c),
+    })
+    // θ is in the bundled font; the Chinese characters are not
+    expect(chars.sort()).toEqual(['作', '光', '合', '用'].sort())
+    const p = unsupportedCharactersProblem(chars)
+    expect(p).toMatchObject({ kind: 'unsupported-characters', signature: 'gn.unsupported-chars:han-chinese-japanese-kanji' })
+    expect(p.details.examples).toHaveLength(3)
+    expect(JSON.stringify(p)).not.toContain('光')
+  })
+
+  it('tells our own messages apart from bugs', () => {
+    expect(isUnexpected(new Error('This file is empty.'))).toBe(false)
+    expect(isUnexpected(new TypeError('x is undefined'))).toBe(true)
+    expect(isUnexpected('boom')).toBe(true)
+  })
+
+  it('summarises the browser without the full user agent', () => {
+    const ipad = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15'
+    expect(browserSummary(ipad, 5)).toBe('Safari 18 on iPad')
+    expect(browserSummary(ipad, 0)).toBe('Safari 18 on Mac')
+    const edge = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36 Edg/130.0'
+    expect(browserSummary(edge, 0)).toBe('Edge 130 on Windows')
   })
 })

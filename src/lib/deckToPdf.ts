@@ -22,6 +22,8 @@ export interface PdfOptions {
    * text the built-in PDF font cannot show (e.g. θ, Ω, ∑); without it such characters become "?".
    */
   loadUnicodeFont?: () => Promise<Uint8Array>
+  /** Called once with the characters no available font could show (drawn as "?"), if there are any. */
+  onUnsupportedCharacters?: (chars: string[]) => void
 }
 
 /** Lets the browser repaint (progress, spinners) between chunks of work. */
@@ -67,6 +69,7 @@ export async function deckToPdf(deck: Deck, opts: PdfOptions): Promise<Uint8Arra
     opts.onProgress?.(i + 1, total)
     await yieldToUi()
   }
+  if (fonts.unsupported.size > 0) opts.onUnsupportedCharacters?.([...fonts.unsupported])
   return pdf.save()
 }
 
