@@ -1,5 +1,5 @@
-import { LineCapStyle, PDFDocument, PDFFont, PDFImage, PDFPage, rgb, StandardFonts } from 'pdf-lib'
-import { CARD_H, CARD_W, type Deck, type Side } from './goodnotes/model'
+import { PDFDocument, PDFFont, PDFImage, PDFPage, rgb, StandardFonts } from 'pdf-lib'
+import { CARD_H, CARD_W, type Deck, type Side, type Stroke } from './goodnotes/model'
 
 export type PdfLayout = 'pages' | 'stacked'
 
@@ -8,7 +8,17 @@ export interface PdfOptions {
   layout: PdfLayout
   /** Prints "Deck · Card n of m · Question" in a band above each card. */
   labels: boolean
+  /** Called after each card with (cards done, total), and with (total, total) before the file is written. */
+  onProgress?: (done: number, total: number) => void
+  /**
+   * Optional fast path for images, e.g. re-encoding PNGs as JPEGs in the browser.
+   * PNG decoding inside pdf-lib is slow for large images.
+   */
+  convertImage?: (data: Uint8Array) => Promise<Uint8Array | null>
 }
+
+/** Lets the browser repaint (progress, spinners) between chunks of work. */
+const yieldToUi = () => new Promise<void>((r) => setTimeout(r, 0))
 
 const LABEL_BAND = 48
 const GAP = 36
@@ -21,7 +31,10 @@ export async function deckToPdf(deck: Deck, opts: PdfOptions): Promise<Uint8Arra
   const font = await pdf.embedFont(StandardFonts.Helvetica)
   const images = new Map<Uint8Array, PDFImage | null>()
   const embed = async (data: Uint8Array) => {
-    if (!images.has(data)) images.set(data, await embedImage(pdf, data))
+    if (!images.has(data)) {
+      const converted = opts.convertImage ? await opts.convertImage(data).catch(() => null) : null
+      images.set(data, await embedImage(pdf, converted ?? data))
+    }
     return images.get(data)!
   }
 
@@ -46,6 +59,8 @@ export async function deckToPdf(deck: Deck, opts: PdfOptions): Promise<Uint8Arra
         top -= CARD_H + GAP
       }
     }
+    opts.onProgress?.(i + 1, total)
+    await yieldToUi()
   }
   return pdf.save()
 }
@@ -96,23 +111,73 @@ async function drawCard(page: PDFPage, font: PDFFont, side: Side, x: number, top
     })
   }
 
-  for (const s of side.strokes) {
-    const f = (n: number) => n.toFixed(2)
-    let d = `M ${f(s.start[0])} ${f(s.start[1])}`
-    for (let k = 0; k < s.segments.length; k += 4) {
-      const [qx, qy, ex, ey] = s.segments.slice(k, k + 4)
-      d += ` Q ${f(qx)} ${f(qy)} ${f(ex)} ${f(ey)}`
+  await drawStrokes(page, side.strokes, x, top, scale)
+}
+
+/**
+ * Writes all ink strokes of a card side as one raw PDF content stream, one path per pen
+ * (colour + width). Much faster than drawing each stroke through pdf-lib's SVG path parser.
+ * Coordinates are written as whole tenths of a point in a flipped coordinate system, which
+ * keeps the stream small and cheap to build.
+ */
+async function drawStrokes(page: PDFPage, strokes: Stroke[], x: number, top: number, scale: number) {
+  if (strokes.length === 0) return
+  const groups = new Map<string, Stroke[]>()
+  for (const s of strokes) {
+    const key = `${s.color.map((c) => c.toFixed(3)).join(' ')}|${s.width.toFixed(2)}`
+    const g = groups.get(key)
+    if (g) g.push(s)
+    else groups.set(key, [s])
+  }
+  const f = (v: number) => (Math.round(v * 1000) / 1000).toString()
+  const t = (v: number) => Math.round(v * 10)
+  // canvas units → tenths of a point, y pointing down from the card's top-left corner
+  const ops: string[] = [`q ${f(scale / 10)} 0 0 ${f(-scale / 10)} ${f(x)} ${f(top)} cm 1 J 1 j`]
+  for (const group of groups.values()) {
+    const [r, g, b, a] = group[0].color
+    ops.push('q')
+    if (a < 1) {
+      const gs = page.node.newExtGState('GS', page.doc.context.obj({ CA: a, ca: a }))
+      ops.push(`${gs.asString()} gs`)
     }
-    if (s.segments.length === 0) d += ` L ${f(s.start[0] + 0.01)} ${f(s.start[1])}`
-    page.drawSvgPath(d, {
-      x,
-      y: top,
-      scale,
-      borderColor: rgb(s.color[0], s.color[1], s.color[2]),
-      borderOpacity: s.color[3],
-      borderWidth: Math.max(s.width, 0.8) * 1.4 * scale,
-      borderLineCap: LineCapStyle.Round,
-    })
+    ops.push(`${f(r)} ${f(g)} ${f(b)} RG ${t(Math.max(group[0].width, 0.8) * 1.4)} w`)
+    for (const s of group) {
+      let cx = s.start[0]
+      let cy = s.start[1]
+      ops.push(`${t(cx)} ${t(cy)} m`)
+      if (s.segments.length === 0) ops.push(`${t(cx) + 1} ${t(cy)} l`)
+      const seg = s.segments
+      for (let k = 0; k < seg.length; k += 4) {
+        const qx = seg[k]
+        const qy = seg[k + 1]
+        const ex = seg[k + 2]
+        const ey = seg[k + 3]
+        // quadratic → cubic Bézier
+        ops.push(
+          `${t(cx + (2 / 3) * (qx - cx))} ${t(cy + (2 / 3) * (qy - cy))} ${t(ex + (2 / 3) * (qx - ex))} ${t(ey + (2 / 3) * (qy - ey))} ${t(ex)} ${t(ey)} c`,
+        )
+        cx = ex
+        cy = ey
+      }
+    }
+    ops.push('S Q')
+  }
+  ops.push('Q')
+  const ctx = page.doc.context
+  const raw = new TextEncoder().encode(ops.join('\n'))
+  const deflated = await nativeDeflate(raw)
+  const stream = deflated ? ctx.stream(deflated, { Filter: 'FlateDecode' }) : ctx.flateStream(raw)
+  page.node.addContentStream(ctx.register(stream))
+}
+
+/** zlib-compresses with the browser's built-in CompressionStream when available (much faster than JS). */
+async function nativeDeflate(data: Uint8Array): Promise<Uint8Array | null> {
+  if (typeof CompressionStream === 'undefined') return null
+  try {
+    const out = new Blob([data as BlobPart]).stream().pipeThrough(new CompressionStream('deflate'))
+    return new Uint8Array(await new Response(out).arrayBuffer())
+  } catch {
+    return null
   }
 }
 

@@ -427,3 +427,60 @@ input:focus-visible {
     grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
   }
 }
+
+.progress {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+
+.progress-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+
+.progress progress {
+  width: 100%;
+  height: 8px;
+  accent-color: var(--accent);
+}
+
+.spinner {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 50%;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2.4s;
+  }
+}
+
+fieldset.settings {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+fieldset.settings:disabled {
+  opacity: 0.6;
+}
