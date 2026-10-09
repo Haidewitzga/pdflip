@@ -10,6 +10,10 @@ export function Privacy() {
         <li>No cookies, no analytics, no tracking, no ads.</li>
         <li>No accounts and no server-side processing.</li>
         <li>No external fonts or scripts are loaded from third parties.</li>
+        <li>
+          So that PDFlip also opens without internet, your browser keeps a copy of the website's own files (about 4 MB).
+          It contains none of your files. Deleting the website data in your browser settings removes it.
+        </li>
       </ul>
       <h2>Hosting</h2>
       <p>
@@ -31,7 +35,8 @@ export function Privacy() {
       <p lang="de">
         <strong>Deine Dateien verlassen dein Gerät nicht.</strong> PDFlip verarbeitet PDFs und Goodnotes-Dateien
         ausschließlich lokal in deinem Browser. Es werden keine Dateien hochgeladen oder gespeichert. Keine Cookies, kein
-        Tracking, keine Werbung. Die Website wird über GitHub Pages (GitHub Inc., USA) bereitgestellt; dabei verarbeitet
+        Tracking, keine Werbung. Damit PDFlip auch ohne Internet startet, speichert dein Browser eine Kopie der Dateien
+        der Website (ca. 4 MB), aber keine deiner Dateien. Die Website wird über GitHub Pages (GitHub Inc., USA) bereitgestellt; dabei verarbeitet
         GitHub technisch notwendige Daten wie deine IP-Adresse in Server-Logs (Art. 6 Abs. 1 lit. f DSGVO).
       </p>
     </section>

@@ -2,7 +2,8 @@
 
 **Convert Goodnotes flashcards to PDF, and PDFs to Goodnotes flashcards.**
 
-PDFlip runs entirely in your browser: your files are never uploaded anywhere.
+PDFlip runs entirely in your browser: your files are never uploaded anywhere. After the first visit it also works
+without internet, including when added to the iPad Home Screen.
 
 - **PDF → Goodnotes flashcards**: pick a PDF, mark which pages (or page halves) are questions and answers, and
   download a `.goodnotes` flashcard deck you can open in Goodnotes and study with Smart Learn.
