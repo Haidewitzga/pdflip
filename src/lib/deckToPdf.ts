@@ -85,6 +85,18 @@ async function drawCard(page: PDFPage, font: PDFFont, side: Side, x: number, top
     borderWidth: 2,
   })
 
+  if (side.kind === 'image') {
+    const img = await embed(side.data)
+    if (img) {
+      const m = 24 * scale
+      const k = Math.min((W - 2 * m) / img.width, (H - 2 * m) / img.height)
+      const w = img.width * k
+      const h = img.height * k
+      page.drawImage(img, { x: x + (W - w) / 2, y: top - (H + h) / 2, width: w, height: h })
+    }
+    return
+  }
+
   if (side.kind === 'text') {
     drawCentredText(page, font, side.text, x + W / 2, top - H / 2, W - 160 * scale, 48 * scale)
     return

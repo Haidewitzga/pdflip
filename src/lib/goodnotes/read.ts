@@ -93,6 +93,12 @@ async function readSide(v: View | undefined, read: (n: string) => Promise<Uint8A
     const notes = await read('notes/' + uuidPlusOne(canvasRef))
     return readCanvas(notes ?? new Uint8Array(), read)
   }
+  // Picture side: {2: {1: mime type, 2: attachment id}}
+  const picture = content.msg(2)?.str(2)
+  if (picture) {
+    const data = await read('attachments/' + picture)
+    if (data) return { kind: 'image', data }
+  }
   const text = content.msg(1)?.str(2)
   if (text !== undefined || content.fields.length === 0 || (content.fields.length === 1 && content.has(1))) {
     return { kind: 'text', text: text ?? '' }

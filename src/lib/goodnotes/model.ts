@@ -33,6 +33,8 @@ export interface TextBox {
 
 export type Side =
   | { kind: 'text'; text: string }
+  /** A picture used as the whole card side (Goodnotes' image button on a card). */
+  | { kind: 'image'; data: Uint8Array }
   | { kind: 'canvas'; strokes: Stroke[]; images: CanvasImage[]; texts: TextBox[] }
 
 export interface Card {
