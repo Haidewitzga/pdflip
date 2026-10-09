@@ -2,6 +2,7 @@ import JSZip from 'jszip'
 import { readStream, tryParse, View } from '../pb'
 import { decodeBv41 } from '../lz4'
 import { uuidPlusOne } from '../uuid'
+import { parseRtf } from '../rtf'
 import type { CanvasImage, Card, Deck, FilledInk, RGBA, Side, Stroke, TextBox } from './model'
 
 const STROKE_SIGNATURE = 'vuA(v)A(S(uu))A(S(uuuu))vA(f)'
@@ -167,7 +168,8 @@ async function readCanvas(data: Uint8Array, read: (n: string) => Promise<Uint8Ar
       const rtf = e.str(6)
       if (fr && rtf) {
         const scale = e.msg(4)?.num(1, 1) || 1
-        texts.push({ ...fr, text: rtfToText(rtf), fontSize: rtfFontSize(rtf) * scale, z })
+        const runs = parseRtf(rtf).map((r) => ({ ...r, size: r.size * scale }))
+        texts.push({ ...fr, text: runs.map((r) => r.text).join(''), fontSize: (runs[0]?.size ?? 24 * scale), runs, z })
       }
     }
   }
@@ -359,23 +361,9 @@ function readOutline(e: View, h: Uint8Array): OutlineInk | null {
   return { lines: lines.filter(finite), fill: subpaths.length ? { color, subpaths } : null }
 }
 
-/** Extracts plain text from the simple RTF Goodnotes writes for text boxes. */
+/** Plain text of the RTF Goodnotes writes for text boxes. */
 export function rtfToText(rtf: string): string {
-  // Content starts after the last colour switch of the header.
-  const marker = rtf.lastIndexOf('\\cf')
-  let body = marker >= 0 ? rtf.slice(marker).replace(/^\\cf\d+ ?/, '') : rtf
-  body = body
-    .replace(/\\'([0-9a-f]{2})/gi, (_, h) => new TextDecoder('windows-1252').decode(new Uint8Array([parseInt(h, 16)])))
-    .replace(/\\uc0\\u(-?\d+) ?/g, (_, d) => String.fromCharCode((Number(d) + 65536) % 65536))
-    .replace(/\\u(-?\d+)\??/g, (_, d) => String.fromCharCode((Number(d) + 65536) % 65536))
-    .replace(/\\\n/g, '\n')
-    .replace(/\\par\b ?/g, '\n')
-    .replace(/\\[a-z]+-?\d* ?/gi, '')
-    .replace(/[{}]/g, '')
-  return body.trim()
-}
-
-function rtfFontSize(rtf: string): number {
-  const m = rtf.match(/\\fs(\d+)/)
-  return m ? Number(m[1]) / 2 : 24
+  return parseRtf(rtf)
+    .map((r) => r.text)
+    .join('')
 }

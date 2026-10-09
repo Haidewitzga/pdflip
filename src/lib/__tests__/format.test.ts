@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import JSZip from 'jszip'
 import { Msg, readStream, View, writeStream } from '../pb'
 import { decodeBv41 } from '../lz4'
+import { parseRtf, classifyFont } from '../rtf'
 import { uuidPlusOne } from '../uuid'
 import { readDeck, rtfToText } from '../goodnotes/read'
 import { fractionalKeys, writeDeck } from '../goodnotes/write'
@@ -282,6 +283,51 @@ describe('deleted cards and symbols', () => {
       .enumerateIndirectObjects()
       .map(([, obj]) => (obj as { get?: (k: unknown) => unknown }).get?.(PDFName.of('BaseFont'))?.toString() ?? '')
     expect(baseFonts.some((n) => n.includes('DejaVuSans'))).toBe(true)
+  })
+})
+
+describe('text box formatting', () => {
+  const rtf = [
+    '{\\rtf1\\ansi\\ansicpg1252\\cocoartf2867',
+    '\\cocoatextscaling1\\cocoaplatform1{\\fonttbl\\f0\\fnil\\fcharset0 HelveticaNeue;\\f1\\fnil\\fcharset0 HelveticaNeue-Bold;\\f2\\froman\\fcharset0 Times-Italic;}',
+    '{\\colortbl;\\red255\\green255\\blue255;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}',
+    '{\\*\\expandedcolortbl;;\\cssrgb\\c0\\c0\\c0;\\cssrgb\\c100000\\c0\\c0;}',
+    '\\pard\\tx560\\partightenfactor0',
+    '',
+    '\\f0\\fs48 \\cf2 Plain \\f1 bold\\f0  and \\cf3 red\\cf2 \\',
+    '\\f2\\fs36 next \\i0\\b line \\uc0\\u952 }',
+  ].join('\n')
+
+  it('reads fonts, bold, italic, sizes, colours and line breaks', () => {
+    const runs = parseRtf(rtf)
+    expect(runs.map((r) => r.text).join('')).toBe('Plain bold and red\nnext line θ')
+    const at = (t: string) => runs.find((r) => r.text.includes(t))!
+    expect(at('Plain')).toMatchObject({ family: 'sans', bold: false, italic: false, size: 24, color: [0, 0, 0] })
+    expect(at('bold')).toMatchObject({ family: 'sans', bold: true })
+    expect(at('red')).toMatchObject({ color: [1, 0, 0] })
+    expect(at('next')).toMatchObject({ family: 'serif', italic: true, size: 18 })
+    expect(at('line')).toMatchObject({ family: 'serif', bold: true })
+  })
+
+  it('maps font names to families', () => {
+    expect(classifyFont('Menlo-Regular').family).toBe('mono')
+    expect(classifyFont('Georgia-BoldItalic')).toEqual({ family: 'serif', bold: true, italic: true })
+    expect(classifyFont('Avenir-Book').family).toBe('sans')
+  })
+
+  it('draws styled text boxes', async () => {
+    const runs = parseRtf(rtf)
+    const side = { kind: 'canvas' as const, strokes: [], fills: [], images: [], texts: [{ x: 50, y: 50, w: 600, h: 200, text: 'x', fontSize: 24, runs }] }
+    const pdf = await deckToPdf({ title: 't', cards: [{ front: side, back: side }] }, {
+      layout: 'pages',
+      labels: false,
+      loadUnicodeFont: async () => new Uint8Array(readFileSync('public/fonts/DejaVuSans.ttf')),
+    })
+    const loaded = await PDFDocument.load(pdf)
+    const baseFonts = loaded.context
+      .enumerateIndirectObjects()
+      .map(([, obj]) => (obj as { get?: (k: unknown) => unknown }).get?.(PDFName.of('BaseFont'))?.toString() ?? '')
+    for (const f of ['/Helvetica', '/Helvetica-Bold', '/Times-Italic', '/Times-BoldItalic']) expect(baseFonts).toContain(f)
   })
 })
 
