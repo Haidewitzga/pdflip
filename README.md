@@ -5,16 +5,15 @@
 PDFlip runs entirely in your browser: your files are never uploaded anywhere. After the first visit it also works
 without internet, including when added to the iPad Home Screen.
 
-- **PDF → Goodnotes or Anki flashcards**: pick a PDF, mark which pages (or page halves) are questions and answers,
-  and download a `.goodnotes` flashcard deck you can open in Goodnotes and study with Smart Learn, or an `.apkg`
-  package for Anki, AnkiMobile and AnkiDroid.
+- **PDF → Goodnotes flashcards**: pick a PDF, mark which pages (or page halves) are questions and answers, and
+  download a `.goodnotes` flashcard deck you can open in Goodnotes and study with Smart Learn.
 - **Goodnotes flashcards → PDF**: open a deck exported from Goodnotes and get a PDF with all cards (handwriting,
   text boxes and images), either one page per side or question and answer on one page.
 
 > ⚠️ Experimental. The Goodnotes file format is not publicly documented. PDFlip has been tested with Goodnotes 5
 > (7.1.27) on iPad. Keep backups of your original decks.
 
-PDFlip is an independent project and is not affiliated with, endorsed by, or connected to Goodnotes or Anki.
+PDFlip is an independent project and is not affiliated with, endorsed by, or connected to Goodnotes.
 
 ## Development
 

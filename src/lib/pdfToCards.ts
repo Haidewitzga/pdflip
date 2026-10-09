@@ -1,7 +1,5 @@
 import * as pdfjs from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-import { loadSqlJs } from './anki/sqlite'
-import { writeApkg } from './anki/write'
 import { PDFDocument, rgb } from 'pdf-lib'
 import { CARD_H, CARD_W } from './goodnotes/model'
 import { writeDeck, type NewCard, type SideImage } from './goodnotes/write'
@@ -156,27 +154,6 @@ async function thumbnail(first: HTMLCanvasElement): Promise<Uint8Array> {
   return toBytes(c, 'image/jpeg', 0.85)
 }
 
-/** Renders each card's question and answer region of the PDF as JPEG images. */
-async function renderCards(
-  doc: PdfDoc,
-  specs: CardSpec[],
-  onProgress?: (done: number, total: number) => void,
-): Promise<{ cards: NewCard[]; first: HTMLCanvasElement | null }> {
-  const cache = new Map<string, HTMLCanvasElement>()
-  const cards: NewCard[] = []
-  let first: HTMLCanvasElement | null = null
-  for (const [i, spec] of specs.entries()) {
-    const front = await sideImage(doc, spec.front, cache)
-    const back = await sideImage(doc, spec.back, cache)
-    first ??= front.canvas
-    cards.push({ front: front.image, back: back.image })
-    // Keep memory bounded on long documents: only the most recent pages stay rendered.
-    while (cache.size > 2) cache.delete(cache.keys().next().value!)
-    onProgress?.(i + 1, specs.length)
-  }
-  return { cards, first }
-}
-
 /** Builds a .goodnotes deck from marked PDF pages. */
 export async function pdfToDeck(
   doc: PdfDoc,
@@ -184,24 +161,23 @@ export async function pdfToDeck(
   specs: CardSpec[],
   onProgress?: (done: number, total: number) => void,
 ): Promise<Uint8Array> {
-  const { cards, first } = await renderCards(doc, specs, onProgress)
+  const cache = new Map<string, HTMLCanvasElement>()
+  const cards: NewCard[] = []
+  let thumb: Uint8Array | null = null
+  for (const [i, spec] of specs.entries()) {
+    const front = await sideImage(doc, spec.front, cache)
+    const back = await sideImage(doc, spec.back, cache)
+    if (!thumb) thumb = await thumbnail(front.canvas)
+    cards.push({ front: front.image, back: back.image })
+    // Keep memory bounded on long documents: only the most recent pages stay rendered.
+    while (cache.size > 2) cache.delete(cache.keys().next().value!)
+    onProgress?.(i + 1, specs.length)
+  }
   return writeDeck({
     title,
     cards,
     templatePdf: await blankTemplatePdf(),
-    thumbnail: first ? await thumbnail(first) : new Uint8Array(),
+    thumbnail: thumb ?? new Uint8Array(),
     locale: navigator.language.replace('-', '_'),
   })
-}
-
-/** Builds an Anki package (.apkg) from marked PDF pages: one picture per question and answer. */
-export async function pdfToAnki(
-  doc: PdfDoc,
-  title: string,
-  specs: CardSpec[],
-  onProgress?: (done: number, total: number) => void,
-): Promise<Uint8Array> {
-  const SQL = await loadSqlJs()
-  const { cards } = await renderCards(doc, specs, onProgress)
-  return writeApkg({ title, cards: cards.map((c) => ({ front: c.front.data, back: c.back.data })) }, SQL)
 }
