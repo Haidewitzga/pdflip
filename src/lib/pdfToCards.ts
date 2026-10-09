@@ -20,7 +20,7 @@ export async function pageSizes(doc: PdfDoc): Promise<{ w: number; h: number }[]
 
 export async function openPdf(data: ArrayBuffer): Promise<PdfDoc> {
   try {
-    return await pdfjs.getDocument({ data: new Uint8Array(data) }).promise
+    return await pdfjs.getDocument({ data: new Uint8Array(data), isEvalSupported: false, enableXfa: false }).promise
   } catch (e) {
     if (e instanceof Error && e.name === 'PasswordException') throw new Error('This PDF is password-protected. Remove the password and try again.')
     throw new Error('Could not read this PDF.')

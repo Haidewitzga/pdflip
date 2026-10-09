@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { readDeck } from '../lib/goodnotes/read'
+import { readGoodnotesFile } from '../lib/fileCheck'
 import type { Deck } from '../lib/goodnotes/model'
 import { deckToPdf, type PdfLayout } from '../lib/deckToPdf'
 import { pngToJpeg } from '../lib/browserImages'
@@ -32,12 +33,20 @@ export default function GoodnotesToPdf() {
     setFileName(file.name)
     setStatus({ step: 'reading' })
     try {
-      setDeck(await readDeck(await file.arrayBuffer()))
+      setDeck(await readDeck(await readGoodnotesFile(file)))
       setStatus({ step: 'ready' })
     } catch (e) {
+      setFileName('')
       setError(e instanceof Error ? e.message : String(e))
       setStatus({ step: 'empty' })
     }
+  }
+
+  function clearFile() {
+    setDeck(null)
+    setFileName('')
+    setError('')
+    setStatus({ step: 'empty' })
   }
 
   /** Any change to the settings invalidates a finished PDF. */
@@ -81,7 +90,13 @@ export default function GoodnotesToPdf() {
       </p>
 
       <fieldset className="settings" disabled={working}>
-        <FilePicker label={fileName || 'Choose a .goodnotes file'} hint="or drop it here" onFile={onFile} />
+        <FilePicker
+          label="Choose a .goodnotes file"
+          hint="or drop it here"
+          onFile={onFile}
+          fileName={fileName}
+          onClear={clearFile}
+        />
       </fieldset>
 
       {error && <p className="error" role="alert">{error}</p>}

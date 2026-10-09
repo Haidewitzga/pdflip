@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { openPdf, pageSizes, pdfToDeck, renderPage, type CardSpec, type PdfDoc } from '../lib/pdfToCards'
+import { readPdfFile } from '../lib/fileCheck'
 import { detectPdflipLayout, type PdflipLayout } from '../lib/pdflipLayout'
 import { autoMarks, MODES, pairMarks, restorePdflipCards, splitPages, type Mark, type Mode } from '../lib/pairing'
 import { canShareFiles, download, safeFilename, share } from '../lib/download'
@@ -32,7 +33,7 @@ export default function PdfToGoodnotes() {
     setResult(null)
     const id = ++loadId.current
     try {
-      const d = await openPdf(await file.arrayBuffer())
+      const d = await openPdf(await readPdfFile(file))
       if (id !== loadId.current) return
       const sizes = await pageSizes(d)
       const made = detectPdflipLayout(sizes)
@@ -63,6 +64,21 @@ export default function PdfToGoodnotes() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
+  }
+
+  function clearFile() {
+    loadId.current++
+    setDoc(null)
+    setFileName('')
+    setTitle('')
+    setThumbs([])
+    setThumbsDone(0)
+    setAspects([])
+    setPdflip(null)
+    setSkipped(new Set())
+    setMarks([])
+    setResult(null)
+    setError('')
   }
 
   function chooseMode(m: Mode) {
@@ -140,7 +156,14 @@ export default function PdfToGoodnotes() {
       </p>
 
       <fieldset className="settings" disabled={!!progress}>
-        <FilePicker accept="application/pdf,.pdf" label={fileName || 'Choose a PDF'} onFile={onFile} hint="or drop a PDF here" />
+        <FilePicker
+          accept="application/pdf,.pdf"
+          label="Choose a PDF"
+          onFile={onFile}
+          hint="or drop a PDF here"
+          fileName={fileName}
+          onClear={clearFile}
+        />
       </fieldset>
 
       {error && <p className="error" role="alert">{error}</p>}

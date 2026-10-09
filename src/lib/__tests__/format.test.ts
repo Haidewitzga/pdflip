@@ -1,3 +1,4 @@
+import { MAX_PDF_BYTES, readGoodnotesFile, readPdfFile } from '../fileCheck'
 import { readFileSync, existsSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import JSZip from 'jszip'
@@ -388,5 +389,28 @@ describe.skipIf(!sample || !existsSync(sample))('real Goodnotes deck', () => {
     expect(deck.cards.length).toBeGreaterThan(0)
     const pdf = await deckToPdf(deck, { layout: 'stacked', labels: true })
     expect(pdf.length).toBeGreaterThan(1000)
+  })
+})
+
+describe('file checks', () => {
+  const file = (name: string, bytes: number[]) => new File([new Uint8Array(bytes)], name)
+  const pdfHead = [...new TextEncoder().encode('%PDF-1.7\n')]
+
+  it('accepts real PDFs and Goodnotes files', async () => {
+    await expect(readPdfFile(file('a.PDF', pdfHead))).resolves.toBeInstanceOf(ArrayBuffer)
+    await expect(readGoodnotesFile(file('a.goodnotes', [0x50, 0x4b, 0x03, 0x04, 0]))).resolves.toBeInstanceOf(ArrayBuffer)
+  })
+
+  it('rejects wrong extensions, wrong contents and empty files', async () => {
+    await expect(readPdfFile(file('a.exe', pdfHead))).rejects.toThrow('PDF file')
+    await expect(readPdfFile(file('a.pdf', [0x4d, 0x5a, 0x90, 0]))).rejects.toThrow('not a valid PDF')
+    await expect(readPdfFile(file('a.pdf', []))).rejects.toThrow('empty')
+    await expect(readGoodnotesFile(file('a.zip', [0x50, 0x4b, 0x03, 0x04]))).rejects.toThrow('Goodnotes file')
+    await expect(readGoodnotesFile(file('a.goodnotes', pdfHead))).rejects.toThrow('not a valid Goodnotes')
+  })
+
+  it('rejects files that are too large', async () => {
+    const big = { name: 'a.pdf', size: MAX_PDF_BYTES + 1 } as File
+    await expect(readPdfFile(big)).rejects.toThrow('too large')
   })
 })
