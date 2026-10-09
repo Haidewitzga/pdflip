@@ -93,8 +93,15 @@ async function readSide(v: View | undefined, read: (n: string) => Promise<Uint8A
     const notes = await read('notes/' + uuidPlusOne(canvasRef))
     return readCanvas(notes ?? new Uint8Array(), read)
   }
-  return { kind: 'text', text: content.msg(1)?.str(2) ?? '' }
+  const text = content.msg(1)?.str(2)
+  if (text !== undefined || content.fields.length === 0 || (content.fields.length === 1 && content.has(1))) {
+    return { kind: 'text', text: text ?? '' }
+  }
+  // A kind of card content we have not seen in an export yet: say so instead of printing a blank side.
+  return { kind: 'text', text: UNSUPPORTED_SIDE }
 }
+
+export const UNSUPPORTED_SIDE = '[PDFlip cannot read this card side yet]'
 
 async function readCanvas(data: Uint8Array, read: (n: string) => Promise<Uint8Array | undefined>): Promise<Side> {
   const deleted = new Set<string>()

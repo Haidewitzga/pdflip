@@ -3,6 +3,7 @@ import { openPdf, pdfToDeck, renderPage, type CardSpec, type PdfDoc } from '../l
 import { autoMarks, MODES, pairMarks, splitPages, type Mark, type Mode } from '../lib/pairing'
 import { canShareFiles, download, safeFilename, share } from '../lib/download'
 import FilePicker from './FilePicker'
+import Progress from './Progress'
 
 const GOODNOTES_MIME = 'application/octet-stream'
 
@@ -17,6 +18,7 @@ export default function PdfToGoodnotes() {
   const [error, setError] = useState('')
   const [progress, setProgress] = useState<[number, number] | null>(null)
   const [result, setResult] = useState<Uint8Array | null>(null)
+  const [thumbsDone, setThumbsDone] = useState(0)
   const loadId = useRef(0)
 
   const pageCount = doc?.numPages ?? 0
@@ -34,9 +36,10 @@ export default function PdfToGoodnotes() {
       setSkipped(new Set())
       setMarks(autoMarks(d.numPages))
       setThumbs(Array(d.numPages).fill(null))
+      setThumbsDone(0)
       for (let p = 1; p <= d.numPages; p++) {
         if (id !== loadId.current) return
-        const c = await renderPage(d, p, 360)
+        const c = await renderPage(d, p, 280)
         const url = c.toDataURL('image/jpeg', 0.75)
         if (id !== loadId.current) return
         setThumbs((t) => {
@@ -44,6 +47,7 @@ export default function PdfToGoodnotes() {
           n[p - 1] = url
           return n
         })
+        setThumbsDone(p)
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -121,12 +125,17 @@ export default function PdfToGoodnotes() {
         and study with Smart Learn.
       </p>
 
-      <FilePicker accept="application/pdf,.pdf" label={fileName || 'Choose a PDF'} onFile={onFile} hint="or drop a PDF here" />
+      <fieldset className="settings" disabled={!!progress}>
+        <FilePicker accept="application/pdf,.pdf" label={fileName || 'Choose a PDF'} onFile={onFile} hint="or drop a PDF here" />
+      </fieldset>
 
       {error && <p className="error" role="alert">{error}</p>}
 
+      {doc && thumbsDone < pageCount && <Progress label="Loading pages…" done={thumbsDone} total={pageCount} />}
+
       {doc && (
         <>
+          <fieldset className="settings" disabled={!!progress}>
           <h2>1. How are your questions and answers laid out?</h2>
           <div className="modes" role="radiogroup" aria-label="Layout">
             {MODES.map((m) => (
@@ -176,11 +185,22 @@ export default function PdfToGoodnotes() {
             Deck name
             <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} />
           </label>
-          <div className="actions">
-            <button className="primary" onClick={create} disabled={!!progress || cards.length === 0}>
-              {progress ? `Creating… ${progress[0]} / ${progress[1]}` : `Create Goodnotes deck (${cards.length} cards)`}
-            </button>
-          </div>
+          {!progress && (
+            <div className="actions">
+              <button className="primary" onClick={create} disabled={cards.length === 0}>
+                Create Goodnotes deck ({cards.length} cards)
+              </button>
+            </div>
+          )}
+          </fieldset>
+
+          {progress && (
+            <Progress
+              label={progress[0] < progress[1] ? 'Creating deck… card' : 'Packing the deck file…'}
+              done={progress[0] < progress[1] ? progress[0] : undefined}
+              total={progress[0] < progress[1] ? progress[1] : undefined}
+            />
+          )}
 
           {result && (
             <div className="result" role="status">

@@ -48,7 +48,7 @@ export interface CardSpec {
 }
 
 const MARGIN = 36
-const RENDER_PX = 2200
+const RENDER_PX = 1800
 
 function toBytes(canvas: HTMLCanvasElement, type: 'image/png' | 'image/jpeg', quality?: number): Promise<Uint8Array> {
   return new Promise((resolve, reject) =>
