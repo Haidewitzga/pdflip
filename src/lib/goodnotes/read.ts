@@ -294,6 +294,14 @@ async function readCanvas(data: Uint8Array, read: (n: string) => Promise<Uint8Ar
       if (!fr || !bytes) skip('image')
       else if (!imageFormatSupported(bytes)) skip(`image (${imageFormat(bytes)})`)
       else images.push({ ...fr, data: bytes, z })
+    } else if (kind === 11) {
+      // Handwriting converted to typeset maths: field 4 names a PDF of the typeset formula, drawn into
+      // the frame. Field 9 holds the recognised LaTeX and field 11 the original pen strokes.
+      const fr = frame(e.msg(2))
+      const att = e.str(4)
+      const bytes = att ? await read('attachments/' + att) : undefined
+      if (fr && bytes && imageFormat(bytes) === 'PDF') images.push({ ...fr, data: bytes, z })
+      else skip('maths', await elementFingerprint(kind, e, id ? headerFiles.get(id) : undefined, read))
     } else if (kind === 8) {
       const fr = frame(e.msg(2))
       const rtf = e.str(6)

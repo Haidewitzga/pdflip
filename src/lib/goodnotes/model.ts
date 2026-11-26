@@ -30,6 +30,7 @@ export interface CanvasImage extends Layered {
   y: number
   w: number
   h: number
+  /** PNG or JPEG, or a PDF whose first page is drawn (typeset maths). */
   data: Uint8Array
 }
 

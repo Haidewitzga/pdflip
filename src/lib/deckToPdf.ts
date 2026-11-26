@@ -1,4 +1,4 @@
-import { PDFDocument, PDFImage, PDFPage, rgb } from 'pdf-lib'
+import { PDFDocument, PDFEmbeddedPage, PDFImage, PDFPage, rgb } from 'pdf-lib'
 import { FontBook, PLAIN, type FontStyle } from './fonts'
 import { CARD_GAP, FRAME_INSET, LABEL_BAND } from './pdflipLayout'
 import { CARD_H, CARD_W, type CanvasImage, type Deck, type FilledInk, type Side, type Stroke, type TextBox } from './goodnotes/model'
@@ -36,7 +36,7 @@ export async function deckToPdf(deck: Deck, opts: PdfOptions): Promise<Uint8Arra
   pdf.setTitle(deck.title)
   pdf.setCreator('PDFlip')
   const fonts = new FontBook(pdf, opts.loadUnicodeFont)
-  const images = new Map<Uint8Array, PDFImage | null>()
+  const images = new Map<Uint8Array, PDFImage | PDFEmbeddedPage | null>()
   const embed = async (data: Uint8Array) => {
     if (!images.has(data)) {
       const converted = opts.convertImage ? await opts.convertImage(data).catch(() => null) : null
@@ -81,7 +81,7 @@ async function drawLabel(page: PDFPage, fonts: FontBook, text: string, top: numb
   }
 }
 
-type Embed = (data: Uint8Array) => Promise<PDFImage | null>
+type Embed = (data: Uint8Array) => Promise<PDFImage | PDFEmbeddedPage | null>
 
 /** Draws one card side with its top-left corner at (x, top) in PDF coordinates. */
 async function drawCard(page: PDFPage, fonts: FontBook, side: Side, x: number, top: number, scale: number, embed: Embed) {
@@ -99,7 +99,7 @@ async function drawCard(page: PDFPage, fonts: FontBook, side: Side, x: number, t
 
   if (side.kind === 'image') {
     const img = await embed(side.data)
-    if (img) {
+    if (img instanceof PDFImage) {
       const m = 24 * scale
       const k = Math.min((W - 2 * m) / img.width, (H - 2 * m) / img.height)
       const w = img.width * k
@@ -214,8 +214,10 @@ async function drawInk(page: PDFPage, side: Extract<Side, { kind: 'canvas' }>, x
       const pimg = await embed(img.data)
       if (!pimg) continue
       const name = page.node.newXObject('Image', pimg.ref)
-      // unit square → image rectangle, flipped back so the picture is upright
-      ops.push(`q ${f(img.w * 10)} 0 0 ${f(-img.h * 10)} ${f(img.x * 10)} ${f((img.y + img.h) * 10)} cm ${name.asString()} Do Q`)
+      // an image is drawn into the unit square, an embedded PDF page into its own size in points
+      const [sw, sh] = pimg instanceof PDFImage ? [1, 1] : [pimg.width, pimg.height]
+      // → image rectangle, flipped back so the picture is upright
+      ops.push(`q ${f((img.w * 10) / sw)} 0 0 ${f((-img.h * 10) / sh)} ${f(img.x * 10)} ${f((img.y + img.h) * 10)} cm ${name.asString()} Do Q`)
     } else if (item.kind === 'stroke') {
       const s = item.v
       const [r, g, b, a] = s.color
@@ -298,8 +300,10 @@ async function drawCentredText(page: PDFPage, fonts: FontBook, text: string, cx:
   }
 }
 
-async function embedImage(pdf: PDFDocument, data: Uint8Array): Promise<PDFImage | null> {
+async function embedImage(pdf: PDFDocument, data: Uint8Array): Promise<PDFImage | PDFEmbeddedPage | null> {
   try {
+    // typeset maths from Goodnotes comes as a one-page PDF
+    if (data[0] === 0x25 && data[1] === 0x50 && data[2] === 0x44 && data[3] === 0x46) return (await pdf.embedPdf(data, [0]))[0]
     if (data[0] === 0x89 && data[1] === 0x50) return await pdf.embedPng(data)
     if (data[0] === 0xff && data[1] === 0xd8) return await pdf.embedJpg(data)
   } catch {

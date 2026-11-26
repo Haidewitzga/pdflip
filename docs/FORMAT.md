@@ -51,6 +51,9 @@ The element message is `{<kind>: element}`:
 - **7 – ink stroke**: `2: bv41 blob`, `4: colour {1: r, 2: g, 3: b, 4: a}` (zeros omitted), `6: offset {1: dx, 2: dy}`,
   `14: 1` if erased
 - **8 – text box**: `2: frame`, `4: transform {1: scale, ...}`, `6: RTF text`
+- **11 – handwriting converted to typeset maths**: `2: frame`, `3: {center, size}`, `4: attachment id` of a
+  one-page PDF with the typeset formula (drawn into the frame), `9: recognised LaTeX`, `11: original strokes`
+  (repeated `{1: bv41 blob, 2: colour, 4: offset}`), `26: 24`
 
 Coordinates are points on a 1193.28 × 745.8 canvas, origin top-left.
 

@@ -20,7 +20,7 @@ import { fractionalKeys, writeDeck } from '../goodnotes/write'
 import { deckToPdf } from '../deckToPdf'
 import { autoMarks, pairMarks, restorePdflipCards, splitPages } from '../pairing'
 import { detectPdflipLayout, pdflipRegions } from '../pdflipLayout'
-import { PDFDocument, PDFName } from 'pdf-lib'
+import { decodePDFRawStream, PDFArray, PDFDict, PDFDocument, PDFName, PDFRawStream } from 'pdf-lib'
 
 // 1×1 transparent PNG
 const PNG = Uint8Array.from(
@@ -285,15 +285,60 @@ describe('snapped shapes and skipped parts', () => {
       .bytes(5, side(new Msg().bytes(1, new Msg().bytes(1, 'text/plain').bytes(2, 'x'))))
     const zip = new JSZip()
     zip.file('index.events.pb', writeStream([new Msg().bytes(1, 'CARD').bytes(152, card)]))
-    zip.file('notes/' + uuidPlusOne(canvas), writeStream([new Msg().bytes(1, elemId).bytes(7, 'HEADERFILE'), new Msg().bytes(11, item)]))
+    zip.file('notes/' + uuidPlusOne(canvas), writeStream([new Msg().bytes(1, elemId).bytes(7, 'HEADERFILE'), new Msg().bytes(12, item)]))
     zip.file('attachments/' + att, PNG)
     zip.file('attachments/HEADERFILE', new TextEncoder().encode('%PDF-1.7'))
     const deck = await readDeck(await zip.generateAsync({ type: 'uint8array' }))
     expect(deck.skipped).toMatchObject([{ what: 'item (unknown kind)', count: 1 }])
     const detail = deck.skipped![0].detail!
-    expect(detail).toBe('kind=11; fields=1:uuid,2:m(1,2),4:att(PNG),9:b16,11:v×2,26:f32; headerFile=att(PDF)')
+    expect(detail).toBe('kind=12; fields=1:uuid,2:m(1,2),4:att(PNG),9:b16,11:v×2,26:f32; headerFile=att(PDF)')
     expect(detail).not.toContain('secret')
-    expect(unreadablePartProblems(deck.skipped!)[0].signature).toBe('gn.unreadable:item-unknown-kind-11')
+    expect(unreadablePartProblems(deck.skipped!)[0].signature).toBe('gn.unreadable:item-unknown-kind-12')
+  })
+
+  it('draws handwriting converted to typeset maths from its PDF', async () => {
+    const canvas = 'C0000000-0000-5000-8000-000000000010'
+    const att = 'A0000000-0000-4000-8000-000000000003'
+    const formula = await PDFDocument.create()
+    formula.addPage([200, 50]).drawRectangle({ x: 10, y: 10, width: 20, height: 20 })
+    const rect = new Msg().bytes(1, new Msg().f32(1, 100).f32(2, 200)).bytes(2, new Msg().f32(1, 400).f32(2, 100))
+    const ink = new Msg().bytes(1, new Uint8Array([1, 2, 3])).bytes(2, new Msg().f32(4, 1))
+    // fields as Goodnotes writes them: id, frame, centre and size, PDF, layer, LaTeX, original strokes, version
+    const maths = new Msg()
+      .bytes(1, 'E0000000-0000-4000-8000-000000000004')
+      .bytes(2, rect)
+      .bytes(3, rect)
+      .bytes(4, att)
+      .bytes(5, new Msg().bytes(1, new Msg().int(2, 7)))
+      .bytes(9, 'x _ { 1 }')
+      .bytes(11, ink)
+      .int(26, 24)
+    const side = (content: Msg) => new Msg().bytes(1, content).bytes(2, new Msg().int(1, 1).int(2, 5))
+    const card = new Msg()
+      .bytes(1, 'CARD')
+      .bytes(3, new Msg().bytes(1, 'A'))
+      .bytes(4, side(new Msg().bytes(3, new Msg().bytes(1, canvas))))
+      .bytes(5, side(new Msg().bytes(1, new Msg().bytes(1, 'text/plain').bytes(2, 'x'))))
+    const zip = new JSZip()
+    zip.file('index.events.pb', writeStream([new Msg().bytes(1, 'CARD').bytes(152, card)]))
+    zip.file('notes/' + uuidPlusOne(canvas), writeStream([new Msg().bytes(11, maths)]))
+    zip.file('attachments/' + att, await formula.save())
+    const deck = await readDeck(await zip.generateAsync({ type: 'uint8array' }))
+    expect(deck.skipped).toEqual([])
+    const front = deck.cards[0].front
+    expect(front.kind === 'canvas' && front.images[0]).toMatchObject({ x: 100, y: 200, w: 400, h: 100 })
+
+    // the formula's page is placed as a form XObject scaled to the frame: 400 / 200 wide, 100 / 50 high
+    const out = await PDFDocument.load(await deckToPdf(deck, { layout: 'pages', labels: false }))
+    const page = out.getPage(0)
+    const xobjects = page.node.Resources()!.lookup(PDFName.of('XObject'), PDFDict)
+    const forms = xobjects.keys().filter((k) => (xobjects.lookup(k) as PDFRawStream).dict.get(PDFName.of('Subtype'))?.toString() === '/Form')
+    expect(forms).toHaveLength(1)
+    const streams = page.node.Contents() as PDFArray
+    const content = Array.from({ length: streams.size() }, (_, i) =>
+      new TextDecoder().decode(decodePDFRawStream(streams.lookup(i) as PDFRawStream).decode()),
+    ).join('\n')
+    expect(content).toContain(`q 20 0 0 -20 1000 3000 cm ${forms[0].toString()} Do Q`)
   })
 
   it('explains that a file without flashcards is not a deck', async () => {
