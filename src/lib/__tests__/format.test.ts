@@ -264,6 +264,14 @@ describe('snapped shapes and skipped parts', () => {
     expect(deck.skipped![0].detail).toMatch(/fields=1,2,4,9; signature=vuA\(v\)A\(S\(uu\)\)/)
   })
 
+  it('fingerprints the structure of a shape it does not know, without its values', async () => {
+    const star = new Msg().bytes(7, new Msg().bytes(1, point(10, 20)).bytes(1, point(30, 40)).int(2, 5))
+    const deck = await readDeck(await deckWithStroke(shapeStroke(star)))
+    const detail = deck.skipped![0].detail!
+    expect(detail).toMatch(/; shape=7:m\(1:m\(1:f32,2:f32\)×2,2:v\),15:f32$/)
+    expect(detail.split('shape=')[1]).not.toMatch(/10|20|30|40/)
+  })
+
   it('fingerprints items of an unknown kind by field types, without their values', async () => {
     const canvas = 'C0000000-0000-5000-8000-000000000010'
     const elemId = 'E0000000-0000-4000-8000-000000000001'
