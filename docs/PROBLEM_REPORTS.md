@@ -34,7 +34,7 @@ such a problem should add one (see the fixer's rules below).
 
 Only technical details, shown to the user before sending: kind, area, a stable signature, character map names,
 Unicode code points (up to five) and their 4096-character blocks, pdf.js warnings (numbers removed), structural fingerprints of unreadable
-parts (field numbers, type signature, first bytes), error messages and stack lines, the PDFlip commit and a browser
+parts (field numbers and types, attachment formats, type signature, first bytes), error messages and stack lines, the PDFlip commit and a browser
 summary like "Safari 18 on iPad". Never the file, its images or card text. Issues are public.
 
 ## The relay (`relay/`)

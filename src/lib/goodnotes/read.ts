@@ -1,5 +1,5 @@
 import JSZip from 'jszip'
-import { readStream, tryParse, View } from '../pb'
+import { readStream, tryParse, View, type Field } from '../pb'
 import { decodeBv41 } from '../lz4'
 import { uuidPlusOne } from '../uuid'
 import { parseRtf } from '../rtf'
@@ -180,6 +180,43 @@ function inkFingerprint(e: View): string {
   return parts.join('; ')
 }
 
+const UUID = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i
+
+/**
+ * Structure of an element of a kind we do not know: each field's number and type ("v" varint, "f32",
+ * "f64", "m(…)" message with its field numbers, "uuid", "b<length>" other bytes), and the format of
+ * any attachment it names. Never the values themselves, so no card text or drawing ends up in a report.
+ */
+async function elementFingerprint(kind: number, e: View, headerFile: string | undefined, read: (n: string) => Promise<Uint8Array | undefined>): Promise<string> {
+  const attachment = async (name: string) => {
+    const data = await read('attachments/' + name)
+    return data ? `att(${imageFormat(data)})` : undefined
+  }
+  const describe = async (x: Field): Promise<string> => {
+    if (x.t === 0) return 'v'
+    if (x.t === 5) return 'f32'
+    if (x.t === 1) return 'f64'
+    const text = ascii.decode(x.v)
+    if (UUID.test(text)) return (await attachment(text)) ?? 'uuid'
+    const sub = View.try(x.v)
+    if (sub && sub.fields.length) {
+      const nums = [...new Set(sub.fields.map((f) => f.f))]
+      return `m(${nums.slice(0, 8).join(',')}${nums.length > 8 ? ',…' : ''})`
+    }
+    return `b${x.v.length}`
+  }
+  const byField = new Map<number, { type: string; count: number }>()
+  for (const x of e.fields) {
+    const cur = byField.get(x.f)
+    if (cur) cur.count++
+    else byField.set(x.f, { type: await describe(x), count: 1 })
+  }
+  const fields = [...byField].map(([f, { type, count }]) => `${f}:${type}${count > 1 ? '×' + count : ''}`)
+  const parts = [`kind=${kind}`, `fields=${fields.join(',')}`]
+  if (headerFile) parts.push(`headerFile=${(await attachment(headerFile)) ?? 'missing'}`)
+  return parts.join('; ').slice(0, 500)
+}
+
 async function readSide(v: View | undefined, read: (n: string) => Promise<Uint8Array | undefined>, skip: Skip): Promise<Side> {
   const content = v?.msg(1)
   if (!content) return { kind: 'text', text: '' }
@@ -266,7 +303,7 @@ async function readCanvas(data: Uint8Array, read: (n: string) => Promise<Uint8Ar
         texts.push({ ...fr, text: runs.map((r) => r.text).join(''), fontSize: (runs[0]?.size ?? 24 * scale), runs, z })
       } else skip('text box', `fields=${fieldList(e)}; frame=${!!fr}; rtf=${!!rtf}`)
     } else {
-      skip('item (unknown kind)', `kind=${kind}; fields=${fieldList(e)}`)
+      skip('item (unknown kind)', await elementFingerprint(kind, e, id ? headerFiles.get(id) : undefined, read))
     }
   }
   return { kind: 'canvas', strokes, fills, images, texts }

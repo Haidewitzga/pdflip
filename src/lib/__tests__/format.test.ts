@@ -4,6 +4,7 @@ import {
   missingCharacterMapProblem,
   pdfReaderWarningProblem,
   reportableWarnings,
+  unreadablePartProblems,
   unsupportedCharactersProblem,
 } from '../problems'
 import { MAX_PDF_BYTES, readGoodnotesFile, readPdfFile } from '../fileCheck'
@@ -261,6 +262,38 @@ describe('snapped shapes and skipped parts', () => {
     expect(deck.skipped).toMatchObject([{ card: 1, side: 'question', what: 'pen stroke', count: 1 }])
     // a technical fingerprint for problem reports: the ink's type signature and element fields
     expect(deck.skipped![0].detail).toMatch(/fields=1,2,4,9; signature=vuA\(v\)A\(S\(uu\)\)/)
+  })
+
+  it('fingerprints items of an unknown kind by field types, without their values', async () => {
+    const canvas = 'C0000000-0000-5000-8000-000000000010'
+    const elemId = 'E0000000-0000-4000-8000-000000000001'
+    const att = 'A0000000-0000-4000-8000-000000000002'
+    const rect = new Msg().bytes(1, new Msg().f32(1, 1).f32(2, 2)).bytes(2, new Msg().f32(1, 3).f32(2, 4))
+    const item = new Msg()
+      .bytes(1, elemId)
+      .bytes(2, rect)
+      .bytes(4, att)
+      .bytes(9, 'secret card text')
+      .int(11, 3)
+      .int(11, 4)
+      .f32(26, 0.5)
+    const side = (content: Msg) => new Msg().bytes(1, content).bytes(2, new Msg().int(1, 1).int(2, 5))
+    const card = new Msg()
+      .bytes(1, 'CARD')
+      .bytes(3, new Msg().bytes(1, 'A'))
+      .bytes(4, side(new Msg().bytes(3, new Msg().bytes(1, canvas))))
+      .bytes(5, side(new Msg().bytes(1, new Msg().bytes(1, 'text/plain').bytes(2, 'x'))))
+    const zip = new JSZip()
+    zip.file('index.events.pb', writeStream([new Msg().bytes(1, 'CARD').bytes(152, card)]))
+    zip.file('notes/' + uuidPlusOne(canvas), writeStream([new Msg().bytes(1, elemId).bytes(7, 'HEADERFILE'), new Msg().bytes(11, item)]))
+    zip.file('attachments/' + att, PNG)
+    zip.file('attachments/HEADERFILE', new TextEncoder().encode('%PDF-1.7'))
+    const deck = await readDeck(await zip.generateAsync({ type: 'uint8array' }))
+    expect(deck.skipped).toMatchObject([{ what: 'item (unknown kind)', count: 1 }])
+    const detail = deck.skipped![0].detail!
+    expect(detail).toBe('kind=11; fields=1:uuid,2:m(1,2),4:att(PNG),9:b16,11:v×2,26:f32; headerFile=att(PDF)')
+    expect(detail).not.toContain('secret')
+    expect(unreadablePartProblems(deck.skipped!)[0].signature).toBe('gn.unreadable:item-unknown-kind-11')
   })
 
   it('explains that a file without flashcards is not a deck', async () => {
