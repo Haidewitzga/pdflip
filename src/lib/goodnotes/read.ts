@@ -177,7 +177,33 @@ function inkFingerprint(e: View): string {
       parts.push(`decodeError=${err instanceof Error ? err.message : String(err)}`)
     }
   }
-  return parts.join('; ')
+  // a stroke snapped to a shape keeps the shape in field 9
+  const shape = e.msg(9)
+  if (shape?.fields.length) parts.push(`shape=${structure(shape, 3)}`)
+  return parts.join('; ').slice(0, 500)
+}
+
+/**
+ * Nested field structure of a message, e.g. "1:m(1:m(1:f32,2:f32)×4),15:f32": each field's number,
+ * type ("v", "f32", "f64", "m(…)" with its own structure down to `depth` levels, "b<length>" other
+ * bytes) and how often it repeats. Never the values.
+ */
+function structure(v: View, depth: number): string {
+  const byField = new Map<number, { type: string; count: number }>()
+  for (const x of v.fields) {
+    const cur = byField.get(x.f)
+    if (cur) {
+      cur.count++
+      continue
+    }
+    let type = x.t === 0 ? 'v' : x.t === 5 ? 'f32' : x.t === 1 ? 'f64' : `b${x.v.length}`
+    if (x.t === 2) {
+      const sub = View.try(x.v)
+      if (sub && sub.fields.length) type = depth > 1 ? `m(${structure(sub, depth - 1)})` : 'm'
+    }
+    byField.set(x.f, { type, count: 1 })
+  }
+  return [...byField].map(([f, { type, count }]) => `${f}:${type}${count > 1 ? '×' + count : ''}`).join(',')
 }
 
 const UUID = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i

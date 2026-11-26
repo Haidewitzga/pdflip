@@ -116,7 +116,7 @@ const HINTS: Record<Kind, string> = {
   'unsupported-characters':
     'No bundled font has glyphs for these characters (see the code points and blocks above; work out which writing system they belong to), so they are drawn as "?". Start in `src/lib/fonts.ts` (`FontBook`) and `public/fonts/`. Mind the size of any added font (the site is cached for offline use).',
   'unreadable-part':
-    'The Goodnotes reader skipped a part it does not understand. `structure` is a fingerprint of it (element fields with their types, formats of named attachments, ink type signature, first payload bytes). Start in `src/lib/goodnotes/read.ts` and `docs/FORMAT.md`. Without the user\'s file, reproduce with a hand-built element in the unit tests; if the fingerprint is not enough to decode it, say so on the issue and ask for a sample deck.',
+    'The Goodnotes reader skipped a part it does not understand. `structure` is a fingerprint of it (element fields with their types, formats of named attachments, ink type signature, first payload bytes, the structure of a snapped shape). Start in `src/lib/goodnotes/read.ts` and `docs/FORMAT.md`. Without the user\'s file, reproduce with a hand-built element in the unit tests; if the fingerprint is not enough to decode it, say so on the issue and ask for a sample deck.',
   'unexpected-error':
     'An exception PDFlip does not expect. The stack lines name the bundled files of the version above (`git checkout <version>`, `npm run build`).',
 }
