@@ -249,6 +249,19 @@ describe('snapped shapes and skipped parts', () => {
     expect(deck.skipped).toEqual([])
   })
 
+  it('reads rotated ellipses (#34)', async () => {
+    const shape = new Msg().bytes(4, new Msg().bytes(1, point(100, 50)).bytes(2, point(40, 20)).f32(3, Math.PI / 2))
+    const deck = await readDeck(await deckWithStroke(shapeStroke(shape)))
+    const s = deck.cards[0].front.kind === 'canvas' ? deck.cards[0].front.strokes[0] : undefined
+    expect(s?.start.map(Math.round)).toEqual([100, 70])
+    const ends = s!.segments.filter((_, k) => k % 4 >= 2)
+    const xs = ends.filter((_, k) => k % 2 === 0)
+    const ys = ends.filter((_, k) => k % 2 === 1)
+    // turned by a quarter, the 40 × 20 ellipse stands upright: 20 wide, 40 high
+    expect([Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)].map(Math.round)).toEqual([90, 110, 30, 70])
+    expect(deck.skipped).toEqual([])
+  })
+
   it('reads arcs through their middle point', async () => {
     const shape = new Msg().bytes(2, new Msg().bytes(1, point(0, 0)).bytes(2, point(50, 25)).bytes(3, point(100, 0)))
     const s = (await readDeck(await deckWithStroke(shapeStroke(shape)))).cards[0].front

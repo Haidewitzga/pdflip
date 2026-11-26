@@ -76,6 +76,7 @@ with the pen width in field 15 and one of:
 - `1: {1: {x, y}, 1: {x, y}, ...}`: a polyline (lines, arrows, triangles, rectangles).
 - `2: {1: start, 2: point halfway along, 3: end}`: an arc.
 - `3: {1: centre, 2: {width, height}}`: an ellipse or circle.
+- `4: {1: centre, 2: {width, height}, 3: rotation (f32, assumed radians)}`: an ellipse turned at an angle.
 Erased strokes look similar but have `3: 1` in their header.
 
 ### Centre lines plus filled outlines

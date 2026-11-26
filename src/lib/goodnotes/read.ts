@@ -413,6 +413,7 @@ function readStroke(e: View): Stroke | OutlineInk | null {
  * - 1: polyline {1: point, 1: point, ...} (lines, arrows, triangles, rectangles)
  * - 2: arc {1: start, 2: a point halfway along, 3: end}
  * - 3: ellipse {1: centre, 2: width and height}
+ * - 4: rotated ellipse {1: centre, 2: width and height, 3: rotation in radians}
  */
 function readShape(e: View): Stroke | null {
   const shape = e.msg(9)
@@ -452,7 +453,7 @@ function readShape(e: View): Stroke | null {
     return valid({ ...style, start: a, segments: [c[0], c[1], b[0], b[1]] })
   }
 
-  const ellipse = shape.msg(3)
+  const ellipse = shape.msg(3) ?? shape.msg(4)
   if (ellipse) {
     const centre = pt(ellipse.msg(1))
     const size = ellipse.msg(2)
@@ -460,15 +461,19 @@ function readShape(e: View): Stroke | null {
     const [cx, cy] = centre
     const rx = size.num(1) / 2
     const ry = size.num(2) / 2
+    const turn = ellipse.num(3) // rotation in radians (field 4 only)
+    const [cos, sin] = [Math.cos(turn), Math.sin(turn)]
+    const at = (x: number, y: number) => [cx + x * cos - y * sin, cy + x * sin + y * cos]
     // eight 45° quadratic segments; the control points sit at the corners of a circumscribed octagon
     const k = 1 / Math.cos(Math.PI / 8)
     const segments: number[] = []
     for (let i = 1; i <= 8; i++) {
       const mid = (i - 0.5) * (Math.PI / 4)
       const end = i * (Math.PI / 4)
-      segments.push(cx + rx * k * Math.cos(mid), cy + ry * k * Math.sin(mid), cx + rx * Math.cos(end), cy + ry * Math.sin(end))
+      segments.push(...at(rx * k * Math.cos(mid), ry * k * Math.sin(mid)), ...at(rx * Math.cos(end), ry * Math.sin(end)))
     }
-    return valid({ ...style, start: [cx + rx, cy], segments })
+    const [sx, sy] = at(rx, 0)
+    return valid({ ...style, start: [sx, sy], segments })
   }
   return null
 }
